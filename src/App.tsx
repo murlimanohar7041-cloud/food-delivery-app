@@ -10,6 +10,7 @@ import { auth, db } from './firebase';
 import { collection, doc, setDoc, updateDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firestore-errors';
 import { AnimatePresence } from 'motion/react';
+import { ShieldCheck, Bike, ArrowLeft, Lock } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import Banners from './components/Banners';
@@ -34,9 +35,10 @@ import ProductModal from './components/ProductModal';
 import Footer from './components/Footer';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import OfflineBanner from './components/OfflineBanner';
-import { Order, CartItem, OrderStatus, RestaurantLocation } from './types';
+import { Order, CartItem, OrderStatus, RestaurantLocation, UserProfile } from './types';
 import { DEFAULT_CUSTOMER_LOCATION, DEFAULT_RESTAURANT_LOCATION } from './utils/geoUtils';
 import { registerServiceWorker, sendOrderStatusNotification } from './utils/pwaUtils';
+import { isUserAdmin, isUserRider, ADMIN_BOOTSTRAP_EMAIL } from './utils/authUtils';
 
 type ViewState = 'home' | 'menu' | 'checkout' | 'success' | 'offers' | 'search' | 'orders' | 'admin' | 'rider' | 'wishlist';
 
@@ -47,10 +49,12 @@ export default function App() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileInitialMode, setProfileInitialMode] = useState<'login' | 'register' | 'admin' | 'rider'>('login');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [activeKitchenLocation, setActiveKitchenLocation] = useState<RestaurantLocation>(DEFAULT_RESTAURANT_LOCATION);
   const prevOrderStatusMap = useRef<Record<string, OrderStatus>>({});
 
@@ -68,7 +72,7 @@ export default function App() {
     // Check URL parameters for view navigation (e.g. from PWA shortcut or Notification Click)
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view') as ViewState | null;
-    if (viewParam && ['home', 'menu', 'checkout', 'success', 'offers', 'search', 'orders', 'admin', 'wishlist'].includes(viewParam)) {
+    if (viewParam && ['home', 'menu', 'checkout', 'success', 'offers', 'search', 'orders', 'admin', 'rider', 'wishlist'].includes(viewParam)) {
       setView(viewParam);
     }
   }, []);
@@ -83,11 +87,41 @@ export default function App() {
       } else {
         setUserEmail(null);
         setUserName(null);
+        setCurrentUserProfile(null);
         setOrders([]);
       }
     });
     return () => unsubscribe();
   }, []);
+
+  // Sync user profile from Firestore in real-time
+  useEffect(() => {
+    if (!currentUser) {
+      setCurrentUserProfile(null);
+      return;
+    }
+
+    const unsubProfile = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const prof = docSnap.data() as UserProfile;
+        setCurrentUserProfile(prof);
+        if (prof.name && !currentUser.displayName) {
+          setUserName(prof.name);
+        }
+        if (prof.blocked) {
+          signOut(auth);
+          toast.error('This account has been suspended by the administrator.');
+        }
+      }
+    }, (err) => {
+      console.warn('User profile sync notice:', err);
+    });
+
+    return () => unsubProfile();
+  }, [currentUser]);
+
+  const isAdmin = isUserAdmin(userEmail, currentUserProfile);
+  const isRider = isUserRider(currentUserProfile) || isAdmin;
 
   // Fetch / Sync Orders from Firestore & Trigger Push/Toast notifications on status change
   useEffect(() => {
@@ -307,13 +341,51 @@ export default function App() {
     }
     setUserName(null);
     setUserEmail(null);
+    setCurrentUserProfile(null);
     toast.success('Logged out successfully');
   }, []);
 
-  const isAdmin = userEmail === 'murlimanohar7041@gmail.com';
+  const openProfileWithMode = (mode: 'login' | 'register' | 'admin' | 'rider' = 'login') => {
+    setProfileInitialMode(mode);
+    setIsProfileOpen(true);
+  };
 
   // Render different full-page views
-  if (view === 'admin' && isAdmin) {
+  if (view === 'admin') {
+    if (!isAdmin) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-[#0a0a0a] flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white dark:bg-[#141414] p-8 rounded-3xl border border-blue-500/20 shadow-2xl text-center space-y-5">
+            <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-2xl flex items-center justify-center mx-auto">
+              <ShieldCheck className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white">Admin Clearance Required</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                This area is restricted to authorized M-Bites administrators only. Please log in with admin credentials.
+              </p>
+            </div>
+            <div className="space-y-3 pt-2">
+              <button
+                onClick={() => openProfileWithMode('admin')}
+                className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Lock className="w-4 h-4" />
+                <span>Login with Admin Credentials</span>
+              </button>
+              <button
+                onClick={() => setView('home')}
+                className="w-full py-3 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-700 dark:text-gray-300 font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Return to Home</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <AdminDashboard 
         orders={orders}
@@ -330,6 +402,40 @@ export default function App() {
   }
 
   if (view === 'rider') {
+    if (!isRider) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-[#0a0a0a] flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-white dark:bg-[#141414] p-8 rounded-3xl border border-amber-500/20 shadow-2xl text-center space-y-5">
+            <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mx-auto">
+              <Bike className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-gray-900 dark:text-white">Delivery Fleet Access</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                Sign in with your Delivery Partner / Rider account to view your deliveries and broadcast live GPS.
+              </p>
+            </div>
+            <div className="space-y-3 pt-2">
+              <button
+                onClick={() => openProfileWithMode('rider')}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-black font-extrabold rounded-xl shadow-lg shadow-amber-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Bike className="w-5 h-5" />
+                <span>Login as Delivery Boy / Rider</span>
+              </button>
+              <button
+                onClick={() => setView('home')}
+                className="w-full py-3 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 text-gray-700 dark:text-gray-300 font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Return to Home</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <DeliveryPartnerDashboard
         onBack={() => setView('home')}
@@ -499,6 +605,7 @@ export default function App() {
       <ProfileModal 
         isOpen={isProfileOpen} 
         onClose={() => setIsProfileOpen(false)} 
+        initialMode={profileInitialMode}
         onLogin={handleLogin}
         onNavigate={(v) => handleNavChange(v as ViewState)}
       />

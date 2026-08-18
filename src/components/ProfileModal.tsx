@@ -1,25 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import { X, Phone, ArrowLeft, MapPin, Locate, Lock, Mail, User as UserIcon, ShieldCheck, CheckCircle2, ShoppingBag, Truck, Edit3, Save, AlertCircle, Eye, EyeOff, Bike } from 'lucide-react';
+import { 
+  X, 
+  MapPin, 
+  Locate, 
+  User as UserIcon, 
+  ShieldCheck, 
+  ShoppingBag, 
+  Truck, 
+  Edit3, 
+  Save, 
+  Eye, 
+  EyeOff, 
+  Bike,
+  Lock,
+  Mail,
+  Phone,
+  KeyRound,
+  ArrowRight,
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
+  LogOut
+} from 'lucide-react';
 import { 
   signInWithPopup, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   updateProfile,
+  sendPasswordResetEmail,
   signOut
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase';
 import { toast } from 'react-hot-toast';
 import { getUserCurrentLocation } from '../utils/geoUtils';
-import { LocationCoords, UserProfile } from '../types';
+import { LocationCoords, UserProfile, UserRole } from '../types';
+import { getAuthErrorMessage, resolveEmailFromIdentifier, ADMIN_BOOTSTRAP_EMAIL, isUserAdmin, isUserRider } from '../utils/authUtils';
 
 interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin?: (name: string) => void;
-  initialMode?: 'login' | 'register';
+  initialMode?: 'login' | 'register' | 'admin' | 'rider';
   onNavigate?: (view: string) => void;
 }
+
+type ModalTab = 'customer-login' | 'register' | 'admin-login' | 'rider-login' | 'forgot-password';
 
 export default function ProfileModal({ 
   isOpen, 
@@ -28,10 +54,8 @@ export default function ProfileModal({
   initialMode = 'login',
   onNavigate 
 }: ProfileModalProps) {
-  const [isRegisterMode, setIsRegisterMode] = useState(initialMode === 'register');
-  const [authMode, setAuthMode] = useState<'default' | 'phone' | 'otp'>('default');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  // Modal Navigation Tab
+  const [activeTab, setActiveTab] = useState<ModalTab>('customer-login');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -47,9 +71,21 @@ export default function ProfileModal({
   const [regLocation, setRegLocation] = useState<LocationCoords | null>(null);
   const [isDetectingGps, setIsDetectingGps] = useState(false);
 
-  // Login form state
-  const [loginEmailOrMobile, setLoginEmailOrMobile] = useState('');
+  // Customer Login form state
+  const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+
+  // Admin Login form state
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+
+  // Rider Login form state
+  const [riderIdentifier, setRiderIdentifier] = useState('');
+  const [riderPassword, setRiderPassword] = useState('');
+
+  // Forgot Password state
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
 
   // User Profile state (when logged in)
   const currentUser = auth.currentUser;
@@ -60,12 +96,20 @@ export default function ProfileModal({
   const [editPincode, setEditPincode] = useState('');
   const [editPhone, setEditPhone] = useState('');
 
-  // Sync mode when prop changes
+  // Sync mode when initialMode prop changes
   useEffect(() => {
-    setIsRegisterMode(initialMode === 'register');
+    if (initialMode === 'register') {
+      setActiveTab('register');
+    } else if (initialMode === 'admin') {
+      setActiveTab('admin-login');
+    } else if (initialMode === 'rider') {
+      setActiveTab('rider-login');
+    } else {
+      setActiveTab('customer-login');
+    }
   }, [initialMode, isOpen]);
 
-  // Load Firestore user profile if logged in
+  // Load Firestore user profile whenever currentUser changes
   useEffect(() => {
     if (!currentUser) {
       setUserProfile(null);
@@ -83,13 +127,16 @@ export default function ProfileModal({
           setEditPincode(data.pincode || '');
           setEditPhone(data.phone || '');
         } else {
-          // If no doc exists yet, seed basic
+          // If no doc exists yet, seed initial profile
+          const isAdmin = currentUser.email?.toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
           const basicProfile: UserProfile = {
             id: currentUser.uid,
-            name: currentUser.displayName || 'Customer',
+            name: currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Customer'),
             email: currentUser.email || '',
-            role: currentUser.email === 'murlimanohar7041@gmail.com' ? 'admin' : 'customer',
-            createdAt: new Date().toISOString()
+            role: isAdmin ? 'admin' : 'customer',
+            createdAt: new Date().toISOString(),
+            blocked: false,
+            totalOrders: 0
           };
           setUserProfile(basicProfile);
           await setDoc(userDocRef, basicProfile);
@@ -112,7 +159,7 @@ export default function ProfileModal({
       toast.dismiss('gps-toast');
       if (res.coords) {
         setRegLocation(res.coords);
-        if (!regCity) setRegCity('Detected Location');
+        if (!regCity) setRegCity('Current Location');
         toast.success('Live Location Permission Granted! 📍');
       } else if (res.error) {
         toast.error(res.error, { duration: 4000 });
@@ -125,7 +172,7 @@ export default function ProfileModal({
     }
   };
 
-  // Google Login
+  // Google Sign-In
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
@@ -133,26 +180,43 @@ export default function ProfileModal({
       if (result.user) {
         const userDocRef = doc(db, 'users', result.user.uid);
         const snap = await getDoc(userDocRef);
+        let userRole: UserRole = result.user.email?.toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase() ? 'admin' : 'customer';
+        
         if (!snap.exists()) {
           const newProf: UserProfile = {
             id: result.user.uid,
             name: result.user.displayName || 'Customer',
-            email: result.user.email || '',
-            role: result.user.email === 'murlimanohar7041@gmail.com' ? 'admin' : 'customer',
-            createdAt: new Date().toISOString()
+            email: (result.user.email || '').toLowerCase(),
+            role: userRole,
+            createdAt: new Date().toISOString(),
+            blocked: false,
+            totalOrders: 0
           };
           await setDoc(userDocRef, newProf);
+          setUserProfile(newProf);
+        } else {
+          const existingData = snap.data() as UserProfile;
+          if (existingData.blocked) {
+            await signOut(auth);
+            toast.error('Your account has been suspended by the administrator.');
+            return;
+          }
+          userRole = existingData.role || userRole;
+          setUserProfile(existingData);
         }
-        onLogin?.(result.user.displayName || 'Customer');
-        toast.success(`Welcome back, ${result.user.displayName || 'Customer'}!`);
+
+        const nameToGreet = result.user.displayName || 'Customer';
+        onLogin?.(nameToGreet);
+        toast.success(`Welcome back, ${nameToGreet}! 👋`);
         onClose();
+
+        if (userRole === 'admin') {
+          onNavigate?.('admin');
+        }
       }
     } catch (error: any) {
-      if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized domain')) {
-        toast.error('Preview note: Please add this domain to Firebase Console.', { duration: 6000 });
-      } else if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
-        toast.error(error.message || 'Google Sign-In failed');
-      }
+      console.error('Google Sign-In failed:', error);
+      toast.error(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -162,15 +226,15 @@ export default function ProfileModal({
   const handleCustomerRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!regEmail.trim() || !regPassword) {
-      toast.error('Please enter a valid email and password');
+      toast.error('Please provide a valid email and password');
       return;
     }
     if (regPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
+      toast.error('Password must be at least 6 characters long');
       return;
     }
     if (regPassword !== regConfirmPassword) {
-      toast.error('Passwords do not match');
+      toast.error('Passwords do not match. Please re-enter.');
       return;
     }
     if (!regFullName.trim()) {
@@ -178,77 +242,208 @@ export default function ProfileModal({
       return;
     }
     if (!regAddress.trim()) {
-      toast.error('Please provide a delivery address');
+      toast.error('Please provide your delivery address');
       return;
     }
 
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, regEmail.trim(), regPassword);
+      const emailLower = regEmail.trim().toLowerCase();
+      const userCredential = await createUserWithEmailAndPassword(auth, emailLower, regPassword);
       const user = userCredential.user;
 
       await updateProfile(user, {
         displayName: regFullName.trim()
       });
 
+      const isBootstrapAdmin = emailLower === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
       const customerProfile: UserProfile = {
         id: user.uid,
         name: regFullName.trim(),
-        email: regEmail.trim().toLowerCase(),
+        email: emailLower,
         phone: regMobile.trim(),
-        role: regEmail.trim().toLowerCase() === 'murlimanohar7041@gmail.com' ? 'admin' : 'customer',
+        role: isBootstrapAdmin ? 'admin' : 'customer',
         address: regAddress.trim(),
         city: regCity.trim() || 'New Delhi',
         pincode: regPincode.trim(),
         location: regLocation || undefined,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        blocked: false,
+        totalOrders: 0
       };
 
       await setDoc(doc(db, 'users', user.uid), customerProfile);
       setUserProfile(customerProfile);
-      toast.success('Registration successful! Welcome to M-Bites 🎉');
+      toast.success(`Registration successful! Welcome to M-Bites, ${regFullName.trim()} 🎉`);
       onLogin?.(regFullName.trim());
       onClose();
     } catch (error: any) {
       console.error('Registration failed:', error);
+      toast.error(getAuthErrorMessage(error));
       if (error.code === 'auth/email-already-in-use') {
-        toast.error('Email is already registered. Please log in instead.');
-        setIsRegisterMode(false);
-      } else {
-        toast.error(error.message || 'Registration failed. Please try again.');
+        setActiveTab('customer-login');
+        setLoginIdentifier(regEmail.trim());
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Customer Email / Password Login
+  // Customer Email / Mobile Login
   const handleCustomerLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginEmailOrMobile.trim() || !loginPassword) {
-      toast.error('Please enter email and password');
+    if (!loginIdentifier.trim() || !loginPassword) {
+      toast.error('Please enter your registered email/phone and password');
       return;
     }
 
     setLoading(true);
     try {
-      const email = loginEmailOrMobile.includes('@') 
-        ? loginEmailOrMobile.trim().toLowerCase() 
-        : `${loginEmailOrMobile.replace(/\D/g, '')}@mbites-user.com`;
-
-      const userCred = await signInWithEmailAndPassword(auth, email, loginPassword);
+      const resolvedEmail = await resolveEmailFromIdentifier(loginIdentifier);
+      const userCred = await signInWithEmailAndPassword(auth, resolvedEmail, loginPassword);
       const user = userCred.user;
+
+      // Verify Firestore profile
+      const userDocRef = doc(db, 'users', user.uid);
+      const snap = await getDoc(userDocRef);
+      if (snap.exists()) {
+        const prof = snap.data() as UserProfile;
+        if (prof.blocked) {
+          await signOut(auth);
+          toast.error('This account is suspended. Please contact support.');
+          return;
+        }
+        setUserProfile(prof);
+      }
       
-      onLogin?.(user.displayName || user.email?.split('@')[0] || 'Customer');
-      toast.success(`Welcome back, ${user.displayName || 'Customer'}!`);
+      const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'Customer');
+      onLogin?.(displayName);
+      toast.success(`Welcome back, ${displayName}! 🍔`);
       onClose();
     } catch (error: any) {
-      console.error('Login error:', error);
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        toast.error('Invalid email or password. If you are new, please Register first.');
-      } else {
-        toast.error(error.message || 'Login failed. Please verify credentials.');
+      console.error('Customer Login error:', error);
+      toast.error(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Admin Login
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminEmail.trim() || !adminPassword) {
+      toast.error('Please enter Admin email and password');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const email = adminEmail.trim().toLowerCase();
+      const userCred = await signInWithEmailAndPassword(auth, email, adminPassword);
+      const user = userCred.user;
+
+      // Verify Admin Role in Firestore
+      const userDocRef = doc(db, 'users', user.uid);
+      const snap = await getDoc(userDocRef);
+      let isAllowed = email === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
+
+      if (snap.exists()) {
+        const prof = snap.data() as UserProfile;
+        if (prof.role === 'admin') isAllowed = true;
+        setUserProfile(prof);
+      } else if (isAllowed) {
+        const adminProf: UserProfile = {
+          id: user.uid,
+          name: user.displayName || 'Admin Master',
+          email,
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          blocked: false
+        };
+        await setDoc(userDocRef, adminProf);
+        setUserProfile(adminProf);
       }
+
+      if (!isAllowed) {
+        await signOut(auth);
+        toast.error('Access Denied: This account does not have Admin privileges.');
+        return;
+      }
+
+      toast.success('Admin authentication verified! Opening Admin Command Center 🛡️');
+      onLogin?.(user.displayName || 'Administrator');
+      onClose();
+      onNavigate?.('admin');
+    } catch (error: any) {
+      console.error('Admin Login error:', error);
+      toast.error(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delivery Boy / Rider Login
+  const handleRiderLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!riderIdentifier.trim() || !riderPassword) {
+      toast.error('Please enter Rider email/mobile and password');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const email = await resolveEmailFromIdentifier(riderIdentifier);
+      const userCred = await signInWithEmailAndPassword(auth, email, riderPassword);
+      const user = userCred.user;
+
+      // Verify Rider or Admin Role
+      const userDocRef = doc(db, 'users', user.uid);
+      const snap = await getDoc(userDocRef);
+      let isRiderAuthorized = false;
+
+      if (snap.exists()) {
+        const prof = snap.data() as UserProfile;
+        if (prof.role === 'rider' || prof.role === 'admin' || user.email === ADMIN_BOOTSTRAP_EMAIL) {
+          isRiderAuthorized = true;
+        }
+        setUserProfile(prof);
+      } else if (user.email === ADMIN_BOOTSTRAP_EMAIL) {
+        isRiderAuthorized = true;
+      }
+
+      if (!isRiderAuthorized) {
+        toast('Logged in, but this account is not registered as a Delivery Partner. Register with Admin for rider access.', { icon: 'ℹ️' });
+      } else {
+        toast.success(`Welcome Rider, ${user.displayName || 'Partner'}! 🛵`);
+      }
+
+      onLogin?.(user.displayName || 'Delivery Partner');
+      onClose();
+      onNavigate?.('rider');
+    } catch (error: any) {
+      console.error('Rider Login error:', error);
+      toast.error(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Forgot Password Request
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      toast.error('Please enter your registered email address');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, forgotEmail.trim().toLowerCase());
+      setResetEmailSent(true);
+      toast.success('Password reset link sent to your email! Please check your inbox ✉️');
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      toast.error(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -260,16 +455,22 @@ export default function ProfileModal({
     try {
       setLoading(true);
       await updateDoc(doc(db, 'users', currentUser.uid), {
-        address: editAddress,
-        city: editCity,
-        pincode: editPincode,
-        phone: editPhone
+        address: editAddress.trim(),
+        city: editCity.trim(),
+        pincode: editPincode.trim(),
+        phone: editPhone.trim()
       });
-      setUserProfile((prev) => prev ? { ...prev, address: editAddress, city: editCity, pincode: editPincode, phone: editPhone } : null);
+      setUserProfile((prev) => prev ? { 
+        ...prev, 
+        address: editAddress.trim(), 
+        city: editCity.trim(), 
+        pincode: editPincode.trim(), 
+        phone: editPhone.trim() 
+      } : null);
       setIsEditingProfile(false);
-      toast.success('Address and profile details updated successfully! 💾');
+      toast.success('Address and contact details updated successfully! 💾');
     } catch (e: any) {
-      toast.error('Failed to update details.');
+      toast.error('Failed to update details. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -292,12 +493,14 @@ export default function ProfileModal({
         <div className="p-6 sm:p-8">
           <button 
             onClick={onClose} 
-            className="absolute top-5 right-5 text-gray-500 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors rounded-full p-2"
+            className="absolute top-5 right-5 text-gray-500 hover:text-gray-900 dark:hover:text-white bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors rounded-full p-2 cursor-pointer z-10"
           >
             <X className="w-5 h-5" />
           </button>
 
-          {/* If user is already logged in, show their account dashboard */}
+          {/* ========================================================= */}
+          {/* IF USER IS ALREADY LOGGED IN: SHOW ACCOUNT DASHBOARD     */}
+          {/* ========================================================= */}
           {currentUser ? (
             <div>
               <div className="flex items-center gap-4 mb-6">
@@ -309,9 +512,14 @@ export default function ProfileModal({
                     <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
                       {currentUser.displayName || 'Customer'}
                     </h2>
-                    {userProfile?.role === 'admin' && (
-                      <span className="bg-blue-500/20 text-blue-500 text-xs px-2 py-0.5 rounded-full font-bold">
+                    {isUserAdmin(currentUser.email, userProfile) && (
+                      <span className="bg-blue-500/20 text-blue-500 text-xs px-2.5 py-0.5 rounded-full font-bold">
                         Admin
+                      </span>
+                    )}
+                    {userProfile?.role === 'rider' && !isUserAdmin(currentUser.email, userProfile) && (
+                      <span className="bg-amber-500/20 text-amber-500 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                        Rider
                       </span>
                     )}
                   </div>
@@ -328,7 +536,7 @@ export default function ProfileModal({
                   </span>
                   <button 
                     onClick={() => setIsEditingProfile(!isEditingProfile)}
-                    className="text-xs font-bold text-[#E23744] hover:underline flex items-center gap-1"
+                    className="text-xs font-bold text-[#E23744] hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     <Edit3 className="w-3 h-3" />
                     {isEditingProfile ? 'Cancel' : 'Edit'}
@@ -378,7 +586,7 @@ export default function ProfileModal({
                     <button 
                       onClick={handleSaveProfile}
                       disabled={loading}
-                      className="w-full mt-2 bg-[#E23744] hover:bg-[#d12c38] text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md"
+                      className="w-full mt-2 bg-[#E23744] hover:bg-[#d12c38] text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
                     >
                       <Save className="w-3.5 h-3.5" />
                       Save Address
@@ -412,7 +620,7 @@ export default function ProfileModal({
                     onClose();
                     onNavigate?.('orders');
                   }}
-                  className="flex items-center gap-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/5 hover:border-[#E23744]/40 hover:bg-[#E23744]/5 text-gray-900 dark:text-white text-left transition-all group"
+                  className="flex items-center gap-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/5 hover:border-[#E23744]/40 hover:bg-[#E23744]/5 text-gray-900 dark:text-white text-left transition-all group cursor-pointer"
                 >
                   <div className="p-2.5 bg-red-100 dark:bg-red-500/10 text-[#E23744] rounded-xl group-hover:scale-110 transition-transform">
                     <ShoppingBag className="w-5 h-5" />
@@ -428,7 +636,7 @@ export default function ProfileModal({
                     onClose();
                     onNavigate?.('orders');
                   }}
-                  className="flex items-center gap-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/5 hover:border-emerald-500/40 hover:bg-emerald-500/5 text-gray-900 dark:text-white text-left transition-all group"
+                  className="flex items-center gap-3 p-4 rounded-2xl bg-gray-50 dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/5 hover:border-emerald-500/40 hover:bg-emerald-500/5 text-gray-900 dark:text-white text-left transition-all group cursor-pointer"
                 >
                   <div className="p-2.5 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-500 rounded-xl group-hover:scale-110 transition-transform">
                     <Truck className="w-5 h-5" />
@@ -440,50 +648,34 @@ export default function ProfileModal({
                 </button>
 
                 {/* Admin panel link if admin */}
-                {(userProfile?.role === 'admin' || currentUser.email === 'murlimanohar7041@gmail.com') && (
-                  <>
-                    <button
-                      onClick={() => {
-                        onClose();
-                        onNavigate?.('admin');
-                      }}
-                      className="sm:col-span-2 flex items-center justify-between p-4 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-sm hover:scale-[1.01] transition-all"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <ShieldCheck className="w-5 h-5" />
-                        <span>Open Admin Control Dashboard</span>
-                      </div>
-                      <span>→</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        onClose();
-                        onNavigate?.('rider');
-                      }}
-                      className="sm:col-span-2 flex items-center justify-between p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-sm hover:scale-[1.01] transition-all"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <Bike className="w-5 h-5" />
-                        <span>Open Delivery Partner (Rider) Portal</span>
-                      </div>
-                      <span>→</span>
-                    </button>
-                  </>
+                {isUserAdmin(currentUser.email, userProfile) && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onNavigate?.('admin');
+                    }}
+                    className="sm:col-span-2 flex items-center justify-between p-4 rounded-2xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-blue-600 dark:text-blue-400 font-bold text-sm hover:scale-[1.01] transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ShieldCheck className="w-5 h-5" />
+                      <span>Open Admin Control Dashboard</span>
+                    </div>
+                    <span>→</span>
+                  </button>
                 )}
 
-                {/* Direct Rider Portal button for riders */}
-                {userProfile?.role === 'rider' && currentUser.email !== 'murlimanohar7041@gmail.com' && (
+                {/* Direct Rider Portal button for riders or admin */}
+                {(userProfile?.role === 'rider' || isUserAdmin(currentUser.email, userProfile)) && (
                   <button
                     onClick={() => {
                       onClose();
                       onNavigate?.('rider');
                     }}
-                    className="sm:col-span-2 flex items-center justify-between p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-sm hover:scale-[1.01] transition-all"
+                    className="sm:col-span-2 flex items-center justify-between p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold text-sm hover:scale-[1.01] transition-all cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5">
                       <Bike className="w-5 h-5" />
-                      <span>Open Delivery Boy Tasks Portal</span>
+                      <span>Open Delivery Partner (Rider) Portal</span>
                     </div>
                     <span>→</span>
                   </button>
@@ -498,21 +690,24 @@ export default function ProfileModal({
                   onClose();
                   toast.success('Logged out successfully');
                 }}
-                className="w-full py-3.5 rounded-xl border border-red-500/30 text-[#E23744] hover:bg-red-500/10 font-bold text-sm transition-all"
+                className="w-full py-3.5 rounded-xl border border-red-500/30 text-[#E23744] hover:bg-red-500/10 font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
+                <LogOut className="w-4 h-4" />
                 Log Out
               </button>
             </div>
           ) : (
-            /* Login / Register Views */
+            /* ========================================================= */
+            /* UN-AUTHENTICATED: LOGIN / REGISTER / ADMIN / RIDER VIEWS */
+            /* ========================================================= */
             <>
-              {/* Tab Selector: Login vs Register to Order */}
-              <div className="flex rounded-2xl bg-gray-100 dark:bg-[#0a0a0a] p-1.5 mb-6 border border-black/5 dark:border-white/5">
+              {/* Modern Multi-Role Tab Selector */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-gray-100 dark:bg-[#0a0a0a] p-1.5 rounded-2xl mb-6 border border-black/5 dark:border-white/5">
                 <button
                   type="button"
-                  onClick={() => setIsRegisterMode(false)}
-                  className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${
-                    !isRegisterMode
+                  onClick={() => setActiveTab('customer-login')}
+                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
+                    activeTab === 'customer-login'
                       ? 'bg-white dark:bg-[#1f1f1f] text-gray-900 dark:text-white shadow-md'
                       : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
                   }`}
@@ -521,19 +716,171 @@ export default function ProfileModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsRegisterMode(true)}
-                  className={`flex-1 py-2.5 text-sm font-bold rounded-xl transition-all ${
-                    isRegisterMode
+                  onClick={() => setActiveTab('register')}
+                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
+                    activeTab === 'register'
                       ? 'bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white shadow-md shadow-red-500/20'
                       : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
                   }`}
                 >
-                  Register to Order
+                  Register
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('admin-login')}
+                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
+                    activeTab === 'admin-login'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  Admin Portal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('rider-login')}
+                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
+                    activeTab === 'rider-login'
+                      ? 'bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20'
+                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                  }`}
+                >
+                  Rider Login
                 </button>
               </div>
 
-              {/* Registration Form ("Register to Order") */}
-              {isRegisterMode ? (
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 1: CUSTOMER LOGIN                                         */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'customer-login' && (
+                <div>
+                  <div className="mb-5">
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      Welcome Back 👋
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Log in to access saved addresses, order history, and real-time live GPS tracking.
+                    </p>
+                  </div>
+
+                  {/* 1-tap Google Sign-In */}
+                  <button 
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-3 bg-white dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white font-bold text-sm py-3 rounded-xl hover:bg-gray-50 dark:hover:bg-white/5 active:scale-[0.98] transition-all mb-4 shadow-sm cursor-pointer"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-5 h-5">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                      <path d="M1 1h22v22H1z" fill="none"/>
+                    </svg>
+                    Continue with Google
+                  </button>
+
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="flex-1 h-px bg-gray-200 dark:bg-white/10"></div>
+                    <span className="text-gray-400 font-bold text-xs uppercase">OR with Email / Mobile</span>
+                    <div className="flex-1 h-px bg-gray-200 dark:bg-white/10"></div>
+                  </div>
+
+                  <form onSubmit={handleCustomerLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        Registered Email or 10-Digit Mobile
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          required
+                          value={loginIdentifier}
+                          onChange={(e) => setLoginIdentifier(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#0a0a0a] text-gray-900 dark:text-white text-sm focus:border-[#E23744] outline-none" 
+                          placeholder="name@example.com or 9876543210" 
+                        />
+                        <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Password</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="text-xs text-[#E23744] hover:underline font-bold cursor-pointer"
+                        >
+                          {showPassword ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input 
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#0a0a0a] text-gray-900 dark:text-white text-sm focus:border-[#E23744] outline-none" 
+                          placeholder="••••••••" 
+                        />
+                        <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForgotEmail(loginIdentifier.includes('@') ? loginIdentifier : '');
+                          setActiveTab('forgot-password');
+                        }}
+                        className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-[#E23744] cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+
+                    <button 
+                      type="submit" 
+                      disabled={loading}
+                      className="w-full bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white font-bold text-base py-3.5 rounded-xl hover:shadow-[0_0_20px_rgba(226,55,68,0.4)] active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {loading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Logging in...</span>
+                        </>
+                      ) : (
+                        <span>Login to My Account</span>
+                      )}
+                    </button>
+                  </form>
+
+                  <div className="mt-6 text-center text-xs font-medium text-gray-600 dark:text-gray-400">
+                    New customer?{' '}
+                    <button 
+                      type="button" 
+                      onClick={() => setActiveTab('register')} 
+                      className="text-[#E23744] font-black hover:underline cursor-pointer"
+                    >
+                      Register to Order here
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 2: REGISTER TO ORDER                                      */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'register' && (
                 <div>
                   <div className="mb-5">
                     <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
@@ -597,7 +944,7 @@ export default function ProfileModal({
                           <button 
                             type="button" 
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
                           >
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
@@ -659,7 +1006,7 @@ export default function ProfileModal({
                         type="button"
                         onClick={handleDetectGpsLocation}
                         disabled={isDetectingGps}
-                        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-xs font-bold transition-all ${
+                        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                           regLocation
                             ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                             : 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'
@@ -677,102 +1024,271 @@ export default function ProfileModal({
                     <button 
                       type="submit" 
                       disabled={loading}
-                      className="w-full bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white font-bold text-base py-3.5 rounded-xl hover:shadow-[0_0_20px_rgba(226,55,68,0.4)] active:scale-[0.98] transition-all cursor-pointer mt-2"
+                      className="w-full bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white font-bold text-base py-3.5 rounded-xl hover:shadow-[0_0_20px_rgba(226,55,68,0.4)] active:scale-[0.98] transition-all cursor-pointer mt-2 flex items-center justify-center gap-2"
                     >
-                      {loading ? 'Creating Account...' : 'Complete Registration & Order'}
+                      {loading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Creating Account...</span>
+                        </>
+                      ) : (
+                        <span>Complete Registration & Order</span>
+                      )}
                     </button>
                   </form>
                 </div>
-              ) : (
-                /* Customer Login Form */
+              )}
+
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 3: ADMIN PORTAL LOGIN                                     */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'admin-login' && (
                 <div>
                   <div className="mb-5">
+                    <div className="flex items-center gap-2 text-blue-500 font-black text-xs uppercase tracking-wider mb-1">
+                      <ShieldCheck className="w-4 h-4" />
+                      Secure Staff Portal
+                    </div>
                     <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                      Welcome Back 👋
+                      Admin Command Center 🛡️
                     </h2>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Log in to access saved addresses, previous orders, and live delivery tracking.
+                      Sign in with administrator credentials to manage live orders, menu, customers, riders, and kitchen GPS.
                     </p>
                   </div>
 
-                  {/* 1-tap Google Sign-In */}
-                  <button 
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    disabled={loading}
-                    className="w-full flex items-center justify-center gap-3 bg-white dark:bg-[#0a0a0a] border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white font-bold text-sm py-3 rounded-xl hover:bg-gray-50 dark:hover:bg-white/5 active:scale-[0.98] transition-all mb-4 shadow-sm"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-5 h-5">
-                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                      <path d="M1 1h22v22H1z" fill="none"/>
-                    </svg>
-                    Continue with Google
-                  </button>
-
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex-1 h-px bg-gray-200 dark:bg-white/10"></div>
-                    <span className="text-gray-400 font-bold text-xs uppercase">OR with Email / Password</span>
-                    <div className="flex-1 h-px bg-gray-200 dark:bg-white/10"></div>
-                  </div>
-
-                  <form onSubmit={handleCustomerLogin} className="space-y-4">
+                  <form onSubmit={handleAdminLogin} className="space-y-4">
                     <div>
                       <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                        Registered Email or Mobile
+                        Admin Email Address
                       </label>
-                      <input 
-                        type="text" 
-                        required
-                        value={loginEmailOrMobile}
-                        onChange={(e) => setLoginEmailOrMobile(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#0a0a0a] text-gray-900 dark:text-white text-sm focus:border-[#E23744] outline-none" 
-                        placeholder="e.g. name@example.com" 
-                      />
+                      <div className="relative">
+                        <input 
+                          type="email" 
+                          required
+                          value={adminEmail}
+                          onChange={(e) => setAdminEmail(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
+                          placeholder="murlimanohar7041@gmail.com" 
+                        />
+                        <Mail className="w-4 h-4 text-blue-400 absolute left-3.5 top-3.5" />
+                      </div>
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Password</label>
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Admin Password</label>
                         <button 
                           type="button" 
                           onClick={() => setShowPassword(!showPassword)}
-                          className="text-xs text-[#E23744] hover:underline font-bold"
+                          className="text-xs text-blue-500 hover:underline font-bold cursor-pointer"
                         >
                           {showPassword ? 'Hide' : 'Show'}
                         </button>
                       </div>
-                      <input 
-                        type={showPassword ? 'text' : 'password'}
-                        required
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#0a0a0a] text-gray-900 dark:text-white text-sm focus:border-[#E23744] outline-none" 
-                        placeholder="••••••••" 
-                      />
+                      <div className="relative">
+                        <input 
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={adminPassword}
+                          onChange={(e) => setAdminPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
+                          placeholder="••••••••" 
+                        />
+                        <Lock className="w-4 h-4 text-blue-400 absolute left-3.5 top-3.5" />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
 
                     <button 
                       type="submit" 
                       disabled={loading}
-                      className="w-full bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white font-bold text-base py-3.5 rounded-xl hover:shadow-[0_0_20px_rgba(226,55,68,0.4)] active:scale-[0.98] transition-all cursor-pointer"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3.5 rounded-xl shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
                     >
-                      {loading ? 'Logging in...' : 'Login to My Account'}
+                      {loading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Verifying Security Clearance...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-5 h-5" />
+                          <span>Authenticate & Open Admin Console</span>
+                        </>
+                      )}
                     </button>
                   </form>
+                </div>
+              )}
 
-                  <div className="mt-6 text-center text-xs font-medium text-gray-600 dark:text-gray-400">
-                    New customer?{' '}
-                    <button 
-                      type="button" 
-                      onClick={() => setIsRegisterMode(true)} 
-                      className="text-[#E23744] font-black hover:underline cursor-pointer"
-                    >
-                      Register to Order here
-                    </button>
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 4: RIDER (DELIVERY BOY) LOGIN                             */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'rider-login' && (
+                <div>
+                  <div className="mb-5">
+                    <div className="flex items-center gap-2 text-amber-500 font-black text-xs uppercase tracking-wider mb-1">
+                      <Bike className="w-4 h-4" />
+                      Delivery Fleet Access
+                    </div>
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      Delivery Boy (Rider) Login 🛵
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Log in to access your assigned orders, accept pickups, and broadcast live GPS location to customers.
+                    </p>
                   </div>
+
+                  <form onSubmit={handleRiderLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        Rider Registered Email or Mobile
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="text" 
+                          required
+                          value={riderIdentifier}
+                          onChange={(e) => setRiderIdentifier(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/20 text-gray-900 dark:text-white text-sm focus:border-amber-500 outline-none" 
+                          placeholder="rider@mbites.com or 9876543210" 
+                        />
+                        <Mail className="w-4 h-4 text-amber-400 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Rider Password</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="text-xs text-amber-500 hover:underline font-bold cursor-pointer"
+                        >
+                          {showPassword ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input 
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={riderPassword}
+                          onChange={(e) => setRiderPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-3 rounded-xl border border-amber-500/20 bg-amber-50/30 dark:bg-amber-950/20 text-gray-900 dark:text-white text-sm focus:border-amber-500 outline-none" 
+                          placeholder="••••••••" 
+                        />
+                        <Lock className="w-4 h-4 text-amber-400 absolute left-3.5 top-3.5" />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit" 
+                      disabled={loading}
+                      className="w-full bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-black font-extrabold text-base py-3.5 rounded-xl shadow-lg shadow-amber-500/25 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {loading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Connecting Fleet Portal...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bike className="w-5 h-5" />
+                          <span>Login to Rider Delivery Dashboard</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 5: FORGOT PASSWORD                                        */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'forgot-password' && (
+                <div>
+                  <div className="mb-5">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('customer-login')}
+                      className="text-xs text-gray-500 hover:text-[#E23744] font-bold mb-3 flex items-center gap-1 cursor-pointer"
+                    >
+                      ← Back to Login
+                    </button>
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      Reset Password 🔑
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Enter your registered email address and we will send you a secure password reset link.
+                    </p>
+                  </div>
+
+                  {resetEmailSent ? (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-5 text-center space-y-3">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                      <h4 className="font-bold text-base text-gray-900 dark:text-white">Reset Link Dispatched!</h4>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        We sent instructions to <strong className="text-gray-900 dark:text-white">{forgotEmail}</strong>. Please follow the link to set your new password.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetEmailSent(false);
+                          setActiveTab('customer-login');
+                        }}
+                        className="w-full mt-2 py-2.5 bg-[#E23744] text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        Return to Login
+                      </button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleForgotPassword} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                          Registered Email Address
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type="email" 
+                            required
+                            value={forgotEmail}
+                            onChange={(e) => setForgotEmail(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#0a0a0a] text-gray-900 dark:text-white text-sm focus:border-[#E23744] outline-none" 
+                            placeholder="name@example.com" 
+                          />
+                          <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+                        </div>
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full bg-[#E23744] hover:bg-[#d12c38] text-white font-bold text-base py-3.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        {loading ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Sending link...</span>
+                          </>
+                        ) : (
+                          <span>Send Password Reset Link</span>
+                        )}
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
             </>
@@ -782,4 +1298,3 @@ export default function ProfileModal({
     </div>
   );
 }
-

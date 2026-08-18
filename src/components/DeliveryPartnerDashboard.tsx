@@ -17,8 +17,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { Order, DeliveryPartner, OrderStatus } from '../types';
-import { db } from '../firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import { collection, query, where, onSnapshot, updateDoc, getDocs } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { getUserCurrentLocation } from '../utils/geoUtils';
 
@@ -32,8 +33,8 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
   const [isOnline, setIsOnline] = useState(true);
   const [isBroadcastingLocation, setIsBroadcastingLocation] = useState(false);
   const [activePartner, setActivePartner] = useState<DeliveryPartner>({
-    id: 'rider-rahul-01',
-    name: 'Rahul Sharma',
+    id: auth.currentUser?.uid || 'rider-rahul-01',
+    name: auth.currentUser?.displayName || 'Rahul Sharma',
     phone: '+91 98765 43210',
     vehicleNumber: 'DL 08 CD 4921',
     vehicleType: 'bike',
@@ -43,6 +44,25 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
   });
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const watchIdRef = useRef<number | null>(null);
+
+  // Sync rider profile from Firestore
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (user) {
+      getDoc(doc(db, 'users', user.uid)).then((snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          setActivePartner(prev => ({
+            ...prev,
+            id: user.uid,
+            name: d.name || user.displayName || prev.name,
+            phone: d.phone || prev.phone,
+            vehicleNumber: d.vehicleNumber || prev.vehicleNumber
+          }));
+        }
+      }).catch(err => console.warn('Rider profile load:', err));
+    }
+  }, []);
 
   // Fetch Delivery Orders in real time
   useEffect(() => {

@@ -268,6 +268,13 @@ export default function Navbar({ cartCount, onOpenCart, onOpenProfile, onOpenMob
 
                     <div className="px-2">
                       <button 
+                        onClick={() => { onOpenProfile(); setIsProfileOpen(false); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-all"
+                      >
+                        <User className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        My Profile & Address
+                      </button>
+                      <button 
                         onClick={() => { setView('orders'); setIsProfileOpen(false); }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-all"
                       >

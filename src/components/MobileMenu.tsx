@@ -50,18 +50,21 @@ export default function MobileMenu({ isOpen, onClose, onOpenProfile, userName, o
         <div className="flex flex-col gap-1.5">
           {userName ? (
             <div className="flex flex-col gap-2 mb-3 p-4 bg-[#141414] rounded-2xl border border-white/5 shadow-inner">
-              <div className="flex items-center gap-3 mb-1">
+              <div 
+                className="flex items-center gap-3 mb-1 cursor-pointer hover:opacity-90 transition-opacity"
+                onClick={() => { onClose(); onOpenProfile(); }}
+              >
                 <div className="w-10 h-10 bg-gradient-to-br from-[#E23744] to-[#FF5E5E] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-[0_0_10px_rgba(226,55,68,0.4)]">
                   {userName.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <div className="font-bold text-white text-base">{userName}</div>
-                  <div className="text-xs text-[#FF5E5E] font-semibold">Foodie Member</div>
+                  <div className="text-xs text-[#FF5E5E] font-semibold">Foodie Member • Edit Address →</div>
                 </div>
               </div>
               <button 
                 onClick={() => { onLogout(); onClose(); }}
-                className="flex items-center gap-2 text-gray-400 hover:text-[#E23744] font-bold text-xs transition-colors mt-2 pt-2 border-t border-white/5"
+                className="flex items-center gap-2 text-gray-400 hover:text-[#E23744] font-bold text-xs transition-colors mt-2 pt-2 border-t border-white/5 cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" /> Logout
               </button>
