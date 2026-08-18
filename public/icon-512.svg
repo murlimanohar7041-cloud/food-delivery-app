@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="mbites-grad-512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF385C"/>
+      <stop offset="50%" stop-color="#E23744"/>
+      <stop offset="100%" stop-color="#B3131E"/>
+    </linearGradient>
+    <filter id="shadow-512" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#mbites-grad-512)"/>
+  <circle cx="256" cy="256" r="190" fill="#FFFFFF" fill-opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="4"/>
+  <g filter="url(#shadow-512)" transform="translate(256, 256) scale(1.15) translate(-128, -128)">
+    <path d="M48 160 C48 95, 100 48, 128 48 C156 48, 208 95, 208 160 Z" fill="#FFFFFF"/>
+    <circle cx="128" cy="38" r="14" fill="#FFFFFF"/>
+    <rect x="36" y="164" width="184" height="14" rx="7" fill="#FFFFFF"/>
+    <path d="M20 120 L38 120 M12 140 L34 140 M24 160 L32 160" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round"/>
+    <path d="M92 145 L106 90 L128 122 L150 90 L164 145" fill="none" stroke="#E23744" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M105 18 C100 10, 110 5, 105 -2" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.8"/>
+    <path d="M128 16 C124 8, 132 4, 128 -4" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.9"/>
+    <path d="M151 18 C146 10, 156 5, 151 -2" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.8"/>
+  </g>
+  <text x="256" y="440" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="900" fill="#FFFFFF" text-anchor="middle" letter-spacing="4">
+    M-BITES
+  </text>
+</svg>

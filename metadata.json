@@ -1,0 +1,11 @@
+{
+  "name": "M-Bites Food Delivery",
+  "description": "A high-performance Progressive Web App (PWA) for food delivery with live GPS order tracking, real-time map updates, offline support, and 1-tap mobile installation.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

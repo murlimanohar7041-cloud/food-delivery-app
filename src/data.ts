@@ -1,0 +1,295 @@
+export const categories = [
+  { id: 1, name: 'Pizza', image: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=200&h=200&fit=crop' },
+  { id: 2, name: 'Burgers', image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=200&h=200&fit=crop' },
+  { id: 4, name: 'Healthy', image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=200&h=200&fit=crop' },
+  { id: 5, name: 'Drinks', image: 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=200&h=200&fit=crop' },
+  { id: 6, name: 'Desserts', image: 'https://images.unsplash.com/photo-1551024506-0bccd828d307?w=200&h=200&fit=crop' },
+  { id: 7, name: 'Sushi', image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=200&h=200&fit=crop' },
+  { id: 8, name: 'Coffee', image: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=200&h=200&fit=crop' },
+  { id: 9, name: 'Pasta', image: 'https://images.unsplash.com/photo-1622973536968-3ead9e780960?w=200&h=200&fit=crop' },
+  { id: 10, name: 'Tacos', image: 'https://images.unsplash.com/photo-1564834724105-918b73d1b9e0?w=200&h=200&fit=crop' },
+  { id: 11, name: 'Salads', image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=200&h=200&fit=crop' },
+  { id: 12, name: 'Ice Cream', image: 'https://images.unsplash.com/photo-1497034825429-c343d7c6a68f?w=200&h=200&fit=crop' },
+];
+
+export const menuItems = [
+  {
+    id: 1,
+    name: 'Truffle Burrata Pizza',
+    price: 899,
+    disc: 15,
+    rating: 4.9,
+    ratingsCount: 342,
+    description: 'Wood-fired sourdough base topped with fresh burrata, black truffle shavings, and wild mushrooms.',
+    image: 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Recommended'
+  },
+  {
+    id: 2,
+    name: 'A5 Wagyu Signature Burger',
+    price: 1499,
+    disc: 10,
+    rating: 4.8,
+    ratingsCount: 215,
+    description: 'Premium A5 Japanese Wagyu patty, aged cheddar, caramelized onions, and truffle aioli in a brioche bun.',
+    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&h=400&fit=crop',
+    isVeg: false,
+    category: 'Recommended'
+  },
+  {
+    id: 3,
+    name: 'Saffron Dum Biryani',
+    price: 799,
+    disc: 20,
+    rating: 4.7,
+    ratingsCount: 512,
+    description: 'Aromatic basmati rice slow-cooked with tender chicken, infused with pure Iranian saffron and dry fruits.',
+    image: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=400&h=400&fit=crop',
+    isVeg: false,
+    category: 'Main Course'
+  },
+  {
+    id: 4,
+    name: 'Avocado Quinoa Salad',
+    price: 549,
+    disc: 12,
+    rating: 4.9,
+    ratingsCount: 189,
+    description: 'Organic quinoa, Hass avocado, cherry tomatoes, and microgreens tossed in a zesty lemon-herb vinaigrette.',
+    image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Healthy'
+  },
+  {
+    id: 5,
+    name: 'Crispy Tempura Prawns',
+    price: 699,
+    disc: 15,
+    rating: 4.6,
+    ratingsCount: 210,
+    description: 'Golden tiger prawns fried in a light tempura batter, served with specialized sweet chili dip.',
+    image: 'https://images.unsplash.com/photo-1576107232684-1279f390859f?w=400&h=400&fit=crop',
+    isVeg: false,
+    category: 'Straders'
+  },
+  {
+    id: 6,
+    name: 'Artisanal Cold Brew',
+    price: 299,
+    disc: 5,
+    rating: 4.9,
+    ratingsCount: 430,
+    description: '18-hour steeped single-origin Ethiopian beans served over hand-cut ice.',
+    image: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Drinks'
+  },
+  {
+    id: 7,
+    name: 'Dragon Roll Sushi',
+    price: 850,
+    disc: 18,
+    rating: 4.8,
+    ratingsCount: 390,
+    description: 'Premium eel and cucumber roll topped with thinly sliced avocado, unagi sauce, and sesame seeds.',
+    image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=400&h=400&fit=crop',
+    isVeg: false,
+    category: 'Main Course'
+  },
+  {
+    id: 8,
+    name: 'Paneer Makhani Fondue',
+    price: 650,
+    disc: 12,
+    rating: 4.7,
+    ratingsCount: 650,
+    description: 'Charcoal-smoked paneer cubes served with a velvety, rich tomato and creamy buttery dip.',
+    image: 'https://images.unsplash.com/photo-1551024601-bec78aea704b?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Main Course'
+  },
+  {
+    id: 9,
+    name: 'Acai Superfruit Bowl',
+    price: 480,
+    disc: 15,
+    rating: 4.8,
+    ratingsCount: 320,
+    description: 'Organic Amazonian acai blended with banana, topped with fresh berries, chia seeds, and granola.',
+    image: 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Healthy'
+  },
+  {
+    id: 10,
+    name: 'Garlic Butter Lobster',
+    price: 2200,
+    disc: 25,
+    rating: 4.9,
+    ratingsCount: 115,
+    description: 'Fresh half lobster grilled to perfection with confit garlic butter and fresh parsley.',
+    image: 'https://images.unsplash.com/photo-1553621042-f6e147245754?w=400&h=400&fit=crop',
+    isVeg: false,
+    category: 'Main Course'
+  },
+  {
+    id: 11,
+    name: 'Dark Chocolate Lava Cake',
+    price: 450,
+    disc: 20,
+    rating: 4.8,
+    ratingsCount: 560,
+    description: 'Warm 70% dark Belgian chocolate cake with a molten center, served with Madagascar vanilla bean gelato.',
+    image: 'https://images.unsplash.com/photo-1624353365286-3f8d62daad51?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Desserts'
+  },
+  {
+    id: 12,
+    name: 'Matcha Boba Float',
+    price: 320,
+    disc: 10,
+    rating: 4.9,
+    ratingsCount: 780,
+    description: 'Ceremonial grade matcha whisked with oat milk, tapioca pearls, and a scoop of vanilla foam.',
+    image: 'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400&h=400&fit=crop',
+    isVeg: true,
+    category: 'Drinks'
+  }
+];
+
+export const restaurants = [
+  {
+    id: 1,
+    name: 'The Golden Plate ✦',
+    rating: 4.8,
+    deliveryTime: '45-50 min',
+    cuisines: ['Fine Dining', 'European', 'Italian'],
+    priceForTwo: '₹2500 for two',
+    image: 'https://images.unsplash.com/photo-1544148103-0773bf10d330?w=600&h=400&fit=crop', // Premium dining aesthetic
+    offer: 'Pro Offers',
+    promoted: true,
+  },
+  {
+    id: 2,
+    name: 'Neon Lounge & Bar',
+    rating: 4.5,
+    deliveryTime: 'Nightlife',
+    cuisines: ['Cocktails', 'Bar Tapas', 'Pub Food'],
+    priceForTwo: '₹3000 for two',
+    image: 'https://images.unsplash.com/photo-1514933651103-005eec06c04b?w=600&h=400&fit=crop', // Nightlife/Bar
+    offer: 'Drinks 1+1',
+    promoted: false,
+  },
+  {
+    id: 3,
+    name: 'Green & Lean 🌿',
+    rating: 4.9,
+    deliveryTime: '20-25 min',
+    cuisines: ['Healthy', 'Salads', 'Keto', 'Juices'],
+    priceForTwo: '₹800 for two',
+    image: 'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600&h=400&fit=crop', // Healthy food
+    offer: null,
+    promoted: true,
+  },
+  {
+    id: 4,
+    name: 'Govinda\'s Pure Veg',
+    rating: 4.7,
+    deliveryTime: '25-30 min',
+    cuisines: ['Pure Veg', 'North Indian', 'Thali'],
+    priceForTwo: '₹600 for two',
+    image: 'https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=600&h=400&fit=crop', // Veg Indian
+    offer: '20% OFF',
+    promoted: false,
+  },
+  {
+    id: 5,
+    name: 'Midnight Craving Station',
+    rating: 4.3,
+    deliveryTime: '15-20 min',
+    cuisines: ['Delivery', 'Burgers', 'Fast Food'],
+    priceForTwo: '₹400 for two',
+    image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=600&h=400&fit=crop', // Burger Delivery
+    offer: 'Free Delivery',
+    promoted: false,
+  },
+  {
+    id: 6,
+    name: 'The Artisan Pizzeria',
+    rating: 4.6,
+    deliveryTime: '30-40 min',
+    cuisines: ['Wood-fired Pizza', 'Italian'],
+    priceForTwo: '₹1200 for two',
+    image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?w=600&h=400&fit=crop', // Pizza
+    offer: 'Pro Offers',
+    promoted: true,
+  },
+  {
+    id: 7,
+    name: 'Avocado Bistro',
+    rating: 4.7,
+    deliveryTime: '20-30 min',
+    cuisines: ['Healthy', 'Breakfast', 'Cafe'],
+    priceForTwo: '₹900 for two',
+    image: 'https://images.unsplash.com/photo-1482049016688-2d3e1b311543?w=600&h=400&fit=crop', // Aesthetic breakfast
+    offer: null,
+    promoted: false,
+  },
+  {
+    id: 8,
+    name: 'Club Vertigo',
+    rating: 4.4,
+    deliveryTime: 'Nightlife',
+    cuisines: ['Nightlife', 'Lounge', 'Finger Food'],
+    priceForTwo: '₹4000 for two',
+    image: 'https://images.unsplash.com/photo-1566417713940-fe7c737a9ef2?w=600&h=400&fit=crop', // Club setup
+    offer: '25% on Walk-in',
+    promoted: true,
+  },
+  {
+    id: 9,
+    name: 'Sattvik Heritage',
+    rating: 4.8,
+    deliveryTime: '30-40 min',
+    cuisines: ['Pure Veg', 'South Indian', 'Mithai'],
+    priceForTwo: '₹500 for two',
+    image: 'https://images.unsplash.com/photo-1668236543090-82eba5ee5976?w=600&h=400&fit=crop', // Premium dosa/veg
+    offer: 'Flat ₹100 OFF',
+    promoted: false,
+  },
+  {
+    id: 10,
+    name: 'Steakhouse No. 9',
+    rating: 4.9,
+    deliveryTime: 'Dining Out',
+    cuisines: ['Fine Dining', 'Steaks', 'Wine'],
+    priceForTwo: '₹3500 for two',
+    image: 'https://images.unsplash.com/photo-1600891964092-4316c288032e?w=600&h=400&fit=crop', // Premium steak
+    offer: 'Pro Offers',
+    promoted: true,
+  },
+  {
+    id: 11,
+    name: 'Sushi Zen',
+    rating: 4.8,
+    deliveryTime: '35-45 min',
+    cuisines: ['Japanese', 'Sushi', 'Healthy'],
+    priceForTwo: '₹1400 for two',
+    image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=600&h=400&fit=crop', // Sushi
+    offer: 'Free Dessert',
+    promoted: false,
+  },
+  {
+    id: 12,
+    name: 'Royal Spice Authentic',
+    rating: 4.6,
+    deliveryTime: '30-40 min',
+    cuisines: ['Delivery', 'Biryani', 'Mughlai'],
+    priceForTwo: '₹750 for two',
+    image: 'https://images.unsplash.com/photo-1631515243349-e0cb75fb8d3a?w=600&h=400&fit=crop', // Biryani
+    offer: 'Buy 1 Get 1',
+    promoted: false,
+  }
+];

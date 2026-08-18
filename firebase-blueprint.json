@@ -1,0 +1,146 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role (customer, admin, rider) and saved delivery address",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "admin", "rider"] },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "pincode": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "DeliveryPartner": {
+      "title": "DeliveryPartner",
+      "description": "Registered delivery partner info and status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "rating": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "busy", "offline"] },
+        "currentOrderId": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "speed": { "type": "number" },
+            "heading": { "type": "number" },
+            "updatedAt": { "type": "string" }
+          }
+        }
+      },
+      "required": ["id", "name", "phone", "vehicleNumber", "status"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A food delivery order with live tracking support",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "total": { "type": "number" },
+        "status": { "type": "string" },
+        "date": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "restaurantName": { "type": "string" },
+        "address": {
+          "type": "object",
+          "properties": {
+             "name": { "type": "string" },
+             "address": { "type": "string" },
+             "city": { "type": "string" },
+             "zipCode": { "type": "string" },
+             "phone": { "type": "string" }
+          }
+        },
+        "customerLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "address": { "type": "string" }
+          }
+        },
+        "restaurantLocation": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "address": { "type": "string" }
+          }
+        },
+        "deliveryLocation": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "heading": { "type": "number" },
+            "speed": { "type": "number" },
+            "updatedAt": { "type": "string" }
+          }
+        },
+        "deliveryPartner": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "phone": { "type": "string" },
+            "vehicleNumber": { "type": "string" },
+            "vehicleType": { "type": "string" },
+            "rating": { "type": "number" },
+            "avatar": { "type": "string" }
+          }
+        },
+        "eta": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "minutes": { "type": "number" },
+            "distanceKm": { "type": "number" }
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "required": ["id", "userId", "userEmail", "total", "status", "date", "paymentMethod"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and address data"
+    },
+    "/deliveryPartners/{partnerId}": {
+      "schema": { "$ref": "#/entities/DeliveryPartner" },
+      "description": "Delivery partners and fleet tracking"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "User placed orders with live location & delivery tracking"
+    }
+  }
+}
