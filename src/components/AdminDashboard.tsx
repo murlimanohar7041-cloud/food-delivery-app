@@ -20,12 +20,21 @@ import {
   SlidersHorizontal,
   ChevronDown,
   Plus,
-  Store
+  Store,
+  MessageSquare,
+  Utensils,
+  Tag,
+  Trash2,
+  Edit3,
+  Check
 } from 'lucide-react';
 import { Order, OrderStatus, UserProfile, DeliveryPartner } from '../types';
 import LiveTrackingMap from './LiveTrackingMap';
 import KitchenLocationManager from './KitchenLocationManager';
-import { db } from '../firebase';
+import OrderChatModal from './OrderChatModal';
+import CallModal from './CallModal';
+import { products as initialProducts, Product } from '../products';
+import { db, auth } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, setDoc, addDoc, query, getDocs } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 
@@ -75,12 +84,40 @@ const DEFAULT_RIDERS: DeliveryPartner[] = [
 ];
 
 export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatus }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'orders' | 'customers' | 'riders' | 'kitchen'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'customers' | 'riders' | 'kitchen' | 'menu'>('orders');
   const [customers, setCustomers] = useState<UserProfile[]>([]);
   const [riders, setRiders] = useState<DeliveryPartner[]>(DEFAULT_RIDERS);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+
+  // Real-time Chat & Call modals
+  const [chatOrder, setChatOrder] = useState<Order | null>(null);
+  const [callModalData, setCallModalData] = useState<{
+    isOpen: boolean;
+    targetRole: 'rider' | 'restaurant' | 'customer';
+    targetName: string;
+    targetPhone: string;
+    orderId?: string;
+  }>({
+    isOpen: false,
+    targetRole: 'customer',
+    targetName: '',
+    targetPhone: ''
+  });
+
+  // Menu Management State
+  const [menuItems, setMenuItems] = useState<(Product & { inStock?: boolean })[]>(() => {
+    return initialProducts.map(p => ({ ...p, inStock: true }));
+  });
+  const [menuSearch, setMenuSearch] = useState('');
+  const [selectedMenuCategory, setSelectedMenuCategory] = useState('All');
+  const [isAddDishOpen, setIsAddDishOpen] = useState(false);
+  const [newDishName, setNewDishName] = useState('');
+  const [newDishPrice, setNewDishPrice] = useState('');
+  const [newDishCategory, setNewDishCategory] = useState('Pizza');
+  const [newDishIsVeg, setNewDishIsVeg] = useState(true);
+  const [newDishImage, setNewDishImage] = useState('');
   
   // Search and filter states
   const [orderSearch, setOrderSearch] = useState('');
@@ -293,50 +330,61 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
         </div>
 
         {/* Tab Navigation */}
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex space-x-2 sm:space-x-4 border-t border-white/5 pt-2">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex space-x-2 sm:space-x-4 border-t border-white/5 pt-2 overflow-x-auto">
           <button
             onClick={() => setActiveTab('orders')}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'orders'
                 ? 'border-[#E23744] text-[#E23744]'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
             }`}
           >
             <ShoppingBag className="w-4 h-4" />
-            <span>Orders Management ({orders.length})</span>
+            <span>Orders ({orders.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('menu')}
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+              activeTab === 'menu'
+                ? 'border-[#E23744] text-[#E23744]'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Utensils className="w-4 h-4" />
+            <span>Menu & Kitchen ({menuItems.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('customers')}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'customers'
                 ? 'border-[#E23744] text-[#E23744]'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>Customers Management ({customers.length})</span>
+            <span>Customers ({customers.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('riders')}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'riders'
                 ? 'border-[#E23744] text-[#E23744]'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
             }`}
           >
             <Bike className="w-4 h-4" />
-            <span>Delivery Boys System ({riders.length})</span>
+            <span>Delivery Boys ({riders.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('kitchen')}
-            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all ${
+            className={`pb-2.5 px-3 text-xs sm:text-sm font-black flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'kitchen'
                 ? 'border-[#E23744] text-[#E23744]'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
             }`}
           >
             <Store className="w-4 h-4" />
-            <span>Kitchen & Store GPS</span>
+            <span>Store GPS</span>
           </button>
         </div>
       </div>
@@ -516,19 +564,149 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
                         </td>
 
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => setTrackingOrder(order)}
-                            className="inline-flex items-center gap-1.5 bg-gradient-to-r from-[#E23744] to-orange-500 hover:opacity-90 text-white px-3 py-1.5 rounded-xl text-xs font-black transition-all shadow-md"
-                          >
-                            <Bike className="w-3.5 h-3.5" />
-                            <span>Track GPS</span>
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setChatOrder(order)}
+                              className="p-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-xl text-xs font-bold border border-blue-500/30 transition-colors"
+                              title="Chat with Customer / Rider"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                            </button>
+                            {order.address?.phone && (
+                              <button
+                                type="button"
+                                onClick={() => setCallModalData({
+                                  isOpen: true,
+                                  targetRole: 'customer',
+                                  targetName: `${order.address.firstName || order.address.name || 'Customer'}`,
+                                  targetPhone: order.address.phone || '',
+                                  orderId: order.id
+                                })}
+                                className="p-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-xl text-xs font-bold border border-emerald-500/30 transition-colors"
+                                title="Call Customer"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setTrackingOrder(order)}
+                              className="inline-flex items-center gap-1.5 bg-gradient-to-r from-[#E23744] to-orange-500 hover:opacity-90 text-white px-3 py-1.5 rounded-xl text-xs font-black transition-all shadow-md cursor-pointer"
+                            >
+                              <Bike className="w-3.5 h-3.5" />
+                              <span>Track GPS</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: MENU & KITCHEN MANAGEMENT */}
+        {activeTab === 'menu' && (
+          <div className="space-y-6">
+            <div className="bg-[#15171e] rounded-2xl border border-white/10 p-5 flex items-center justify-between flex-wrap gap-4 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="relative w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search menu dishes..."
+                    value={menuSearch}
+                    onChange={(e) => setMenuSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-gray-500 outline-none focus:border-[#E23744]"
+                  />
+                </div>
+
+                <select
+                  value={selectedMenuCategory}
+                  onChange={(e) => setSelectedMenuCategory(e.target.value)}
+                  className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-300 font-bold outline-none cursor-pointer"
+                >
+                  {['All', 'Pizza', 'Burgers', 'Healthy', 'Drinks', 'Desserts', 'Sushi', 'Pasta', 'Salads', 'Ice Cream'].map(c => (
+                    <option key={c} value={c} className="bg-[#15171e]">{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 font-medium">
+                  {menuItems.filter(m => m.inStock !== false).length} items in stock
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsAddDishOpen(true)}
+                  className="px-4 py-2 bg-gradient-to-r from-[#E23744] to-orange-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md hover:opacity-90 transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add New Dish</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Menu items grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {menuItems
+                .filter(item => {
+                  const matchSearch = item.name.toLowerCase().includes(menuSearch.toLowerCase());
+                  const matchCat = selectedMenuCategory === 'All' || item.category === selectedMenuCategory;
+                  return matchSearch && matchCat;
+                })
+                .map(item => (
+                  <div 
+                    key={item.id}
+                    className={`bg-[#15171e] rounded-2xl border p-4 flex gap-4 items-center transition-all ${
+                      item.inStock !== false 
+                        ? 'border-white/10 hover:border-white/20' 
+                        : 'border-red-500/20 opacity-60 bg-red-950/10'
+                    }`}
+                  >
+                    <img 
+                      src={item.image} 
+                      alt={item.name} 
+                      className="w-16 h-16 rounded-xl object-cover border border-white/10 shrink-0" 
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${item.isVeg ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                        <h4 className="font-bold text-sm text-white truncate">{item.name}</h4>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">{item.category} • ⭐ {item.rating}</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="font-black text-emerald-400 text-sm">₹{item.price}</span>
+                        {item.disc ? (
+                          <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded font-bold">
+                            {item.disc}% OFF
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {/* Stock toggle */}
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = menuItems.map(m => m.id === item.id ? { ...m, inStock: m.inStock === false } : m);
+                          setMenuItems(updated);
+                          toast.success(`${item.name} marked ${item.inStock === false ? 'IN STOCK' : 'OUT OF STOCK'}`);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider transition-all cursor-pointer ${
+                          item.inStock !== false
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        }`}
+                      >
+                        {item.inStock !== false ? 'IN STOCK' : 'OUT OF STOCK'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -845,6 +1023,210 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
               onUpdateStatus={(status) => {
                 if (onUpdateOrderStatus) onUpdateOrderStatus(trackingOrder.id, status);
                 setTrackingOrder((prev) => (prev ? { ...prev, status } : null));
+              }}
+              onClose={() => setTrackingOrder(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Add New Dish Modal */}
+      {isAddDishOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#15171e] rounded-3xl max-w-md w-full p-6 border border-white/10 shadow-2xl">
+            <div className="flex justify-between items-center mb-5 pb-3 border-b border-white/10">
+              <h3 className="font-bold text-base text-white flex items-center gap-2">
+                <Utensils className="w-5 h-5 text-[#E23744]" />
+                Add New Kitchen Dish
+              </h3>
+              <button 
+                onClick={() => setIsAddDishOpen(false)}
+                className="p-1.5 text-gray-400 hover:text-white bg-white/5 rounded-full"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newDishName.trim() || !newDishPrice) {
+                  toast.error('Please enter dish name and price');
+                  return;
+                }
+                const newDish: Product & { inStock?: boolean } = {
+                  id: Date.now(),
+                  name: newDishName.trim(),
+                  price: parseFloat(newDishPrice),
+                  category: newDishCategory,
+                  isVeg: newDishIsVeg,
+                  rating: 4.8,
+                  image: newDishImage.trim() || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=340&h=340&q=75',
+                  inStock: true
+                };
+                setMenuItems(prev => [newDish, ...prev]);
+                setIsAddDishOpen(false);
+                setNewDishName('');
+                setNewDishPrice('');
+                setNewDishImage('');
+                toast.success(`${newDish.name} added to restaurant menu! 🍲`);
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div>
+                <label className="block text-gray-400 font-bold mb-1">Dish Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Paneer Butter Masala"
+                  value={newDishName}
+                  onChange={(e) => setNewDishName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white outline-none focus:border-[#E23744]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 font-bold mb-1">Price (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="299"
+                    value={newDishPrice}
+                    onChange={(e) => setNewDishPrice(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white outline-none focus:border-[#E23744]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-400 font-bold mb-1">Category</label>
+                  <select
+                    value={newDishCategory}
+                    onChange={(e) => setNewDishCategory(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white outline-none"
+                  >
+                    {['Pizza', 'Burgers', 'Healthy', 'Drinks', 'Desserts', 'Sushi', 'Pasta', 'Salads', 'Ice Cream'].map(c => (
+                      <option key={c} value={c} className="bg-[#15171e]">{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 font-bold mb-1">Dish Image URL</label>
+                <input
+                  type="url"
+                  placeholder="https://images.unsplash.com/..."
+                  value={newDishImage}
+                  onChange={(e) => setNewDishImage(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white outline-none focus:border-[#E23744]"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <label className="text-gray-300 font-bold">Food Type:</label>
+                <button
+                  type="button"
+                  onClick={() => setNewDishIsVeg(true)}
+                  className={`px-3 py-1.5 rounded-lg font-bold border transition-all ${
+                    newDishIsVeg 
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                      : 'bg-white/5 text-gray-400 border-white/10'
+                  }`}
+                >
+                  🟢 Pure Veg
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewDishIsVeg(false)}
+                  className={`px-3 py-1.5 rounded-lg font-bold border transition-all ${
+                    !newDishIsVeg 
+                      ? 'bg-red-500/20 text-red-400 border-red-500/40' 
+                      : 'bg-white/5 text-gray-400 border-white/10'
+                  }`}
+                >
+                  🔴 Non-Veg
+                </button>
+              </div>
+
+              <div className="pt-3">
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-gradient-to-r from-[#E23744] to-orange-500 text-white font-black rounded-xl text-sm shadow-lg hover:opacity-90 transition-all cursor-pointer"
+                >
+                  Add Dish to Menu →
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Real-time Order Chat Modal */}
+      {chatOrder && (
+        <OrderChatModal
+          order={chatOrder}
+          currentUserRole="restaurant"
+          currentUserId={auth.currentUser?.uid || 'admin-uid'}
+          currentUserName={auth.currentUser?.displayName || 'M-Bites Kitchen'}
+          onClose={() => setChatOrder(null)}
+          onInitiateCall={(role, phone, name) => {
+            setCallModalData({
+              isOpen: true,
+              targetRole: role,
+              targetName: name,
+              targetPhone: phone,
+              orderId: chatOrder.id
+            });
+          }}
+        />
+      )}
+
+      {/* Secure Call Modal */}
+      <CallModal
+        isOpen={callModalData.isOpen}
+        onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
+        targetRole={callModalData.targetRole}
+        targetName={callModalData.targetName}
+        targetPhone={callModalData.targetPhone}
+        orderId={callModalData.orderId}
+      />
+
+      {/* Real-time Order GPS Live Tracking Modal for Admin */}
+      {trackingOrder && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
+          <div className="bg-[#15171e] rounded-3xl max-w-6xl w-full p-6 relative border border-white/10 shadow-2xl space-y-4 my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#E23744] to-orange-500 flex items-center justify-center text-white shadow-lg">
+                  <Bike className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-base">
+                    Live GPS Telemetry • Order #{trackingOrder.id}
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Customer: {trackingOrder.address.firstName || 'Customer'} • Rider: {trackingOrder.deliveryPartner?.name || 'Assigned Rider'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setTrackingOrder(null)}
+                className="p-2 text-gray-400 hover:text-white rounded-full bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <LiveTrackingMap
+              order={trackingOrder}
+              isAdmin={true}
+              onUpdateStatus={(status) => {
+                if (onUpdateOrderStatus) {
+                  onUpdateOrderStatus(trackingOrder.id, status);
+                }
               }}
               onClose={() => setTrackingOrder(null)}
             />

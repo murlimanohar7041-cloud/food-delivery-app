@@ -574,7 +574,12 @@ export default function App() {
             )}
           </>
         )}
-        {['home', 'search', 'menu', 'offers'].includes(view) && <Footer />}
+        {['home', 'search', 'menu', 'offers'].includes(view) && (
+          <Footer onOpenRiderPortal={() => {
+            setProfileInitialMode('rider');
+            setIsProfileOpen(true);
+          }} />
+        )}
       </main>
 
       {/* Offline Connectivity Indicator */}

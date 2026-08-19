@@ -1,6 +1,16 @@
 // Geographic calculations & real GPS location utilities
 import { LocationCoords } from '../types';
 
+export interface StructuredAddress {
+  formattedAddress: string;
+  street: string;
+  city: string;
+  state: string;
+  pincode: string;
+  area: string;
+  country: string;
+}
+
 /**
  * Calculates the great-circle distance between two points on the Earth (Haversine formula).
  * Returns distance in kilometers.
@@ -63,7 +73,7 @@ export function calculateETA(distanceKm: number, avgSpeedKmh = 25): { minutes: n
  * Requests browser/device geolocation with high accuracy and descriptive error handling.
  */
 export interface GeolocationResult {
-  coords?: LocationCoords & { accuracy?: number; heading?: number; speed?: number };
+  coords?: LocationCoords & { accuracy?: number; heading?: number; speed?: number; structuredAddress?: StructuredAddress };
   error?: string;
   isDenied?: boolean;
 }
@@ -81,14 +91,25 @@ export function getUserCurrentLocation(options?: { timeoutMs?: number }): Promis
     const timeout = options?.timeoutMs || 15000;
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = Math.round(position.coords.accuracy || 0);
+        const heading = position.coords.heading || undefined;
+        const speed = position.coords.speed ? Math.round(position.coords.speed * 3.6) : undefined;
+
+        // Auto reverse-geocode structured address
+        const structured = await reverseGeocodeStructured(lat, lng);
+
         resolve({
           coords: {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: Math.round(position.coords.accuracy || 0),
-            heading: position.coords.heading || undefined,
-            speed: position.coords.speed ? Math.round(position.coords.speed * 3.6) : undefined
+            lat,
+            lng,
+            accuracy,
+            heading,
+            speed,
+            address: structured?.formattedAddress || `GPS (${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+            structuredAddress: structured || undefined
           },
         });
       },
@@ -122,27 +143,115 @@ export function getUserCurrentLocation(options?: { timeoutMs?: number }): Promis
 }
 
 /**
- * Reverse geocodes lat/lng into human-readable street address using OpenStreetMap Nominatim.
+ * High-accuracy multi-provider Reverse Geocoding into structured fields (Street, City, Pincode, etc.)
  */
-export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+export async function reverseGeocodeStructured(lat: number, lng: number): Promise<StructuredAddress | null> {
+  // Provider 1: BigDataCloud client-side free reverse geocoding (fast, accurate, CORS friendly)
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data) {
+        const area = data.locality || data.localityInfo?.administrative?.[3]?.name || '';
+        const city = data.city || data.locality || data.principalSubdivision || 'New Delhi';
+        const state = data.principalSubdivision || '';
+        const pincode = data.postcode || '';
+        const country = data.countryName || 'India';
+        
+        const streetParts = [
+          data.locality,
+          data.principalSubdivision
+        ].filter(Boolean);
+
+        const fullParts = [
+          area,
+          city !== area ? city : '',
+          state,
+          pincode,
+          country
+        ].filter(Boolean);
+
+        const formatted = fullParts.join(', ');
+
+        if (formatted.length > 3) {
+          return {
+            formattedAddress: formatted,
+            street: area || (streetParts.join(', ') || `${city}, ${state}`),
+            city,
+            state,
+            pincode,
+            area,
+            country
+          };
+        }
+      }
+    }
+  } catch (e) {
+    // Fallthrough to OSM Nominatim
+  }
+
+  // Provider 2: OpenStreetMap Nominatim
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
       {
         signal: controller.signal,
         headers: { 'Accept-Language': 'en' }
       }
     );
     clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data && data.display_name) {
-      return data.display_name;
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const street = [
+          addr.house_number,
+          addr.building,
+          addr.road,
+          addr.suburb || addr.neighbourhood || addr.residential
+        ].filter(Boolean).join(', ');
+
+        const city = addr.city || addr.town || addr.village || addr.county || addr.state_district || 'New Delhi';
+        const state = addr.state || '';
+        const pincode = addr.postcode || '';
+        const country = addr.country || 'India';
+        const area = addr.suburb || addr.neighbourhood || addr.road || '';
+
+        return {
+          formattedAddress: data.display_name || `${street}, ${city}, ${state} ${pincode}`,
+          street: street || area || city,
+          city,
+          state,
+          pincode,
+          area,
+          country
+        };
+      }
     }
   } catch (e) {
-    // Graceful offline/timeout fallback
+    // Fallback
+  }
+
+  return null;
+}
+
+/**
+ * Reverse geocodes lat/lng into human-readable street address string.
+ */
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  const structured = await reverseGeocodeStructured(lat, lng);
+  if (structured) {
+    return structured.formattedAddress;
   }
   return null;
 }
@@ -251,4 +360,3 @@ export const DEFAULT_RESTAURANT_LOCATION = {
   lng: 77.2167,
   address: 'Barakhamba Road, Connaught Place, New Delhi',
 };
-

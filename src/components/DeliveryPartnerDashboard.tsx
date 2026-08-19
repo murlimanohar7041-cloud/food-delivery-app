@@ -14,14 +14,20 @@ import {
   ChevronRight,
   RefreshCw,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  MessageSquare,
+  Compass,
+  Gauge,
+  Sparkles
 } from 'lucide-react';
 import { Order, DeliveryPartner, OrderStatus } from '../types';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { collection, query, where, onSnapshot, updateDoc, getDocs } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { getUserCurrentLocation } from '../utils/geoUtils';
+import OrderChatModal from './OrderChatModal';
+import CallModal from './CallModal';
 
 interface DeliveryPartnerDashboardProps {
   onBack: () => void;
@@ -32,6 +38,16 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
   const [orders, setOrders] = useState<Order[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isBroadcastingLocation, setIsBroadcastingLocation] = useState(false);
+  const [currentGpsStats, setCurrentGpsStats] = useState<{
+    lat?: number;
+    lng?: number;
+    accuracy?: number;
+    speed?: number;
+    heading?: number;
+    lastPing?: string;
+    updateCount: number;
+  }>({ updateCount: 0 });
+
   const [activePartner, setActivePartner] = useState<DeliveryPartner>({
     id: auth.currentUser?.uid || 'rider-rahul-01',
     name: auth.currentUser?.displayName || 'Rahul Sharma',
@@ -43,7 +59,44 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&h=120&fit=crop'
   });
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [chatOrder, setChatOrder] = useState<Order | null>(null);
+  const [callModalData, setCallModalData] = useState<{
+    isOpen: boolean;
+    targetRole: 'rider' | 'restaurant' | 'customer';
+    targetName: string;
+    targetPhone: string;
+    orderId?: string;
+  }>({
+    isOpen: false,
+    targetRole: 'customer',
+    targetName: '',
+    targetPhone: ''
+  });
+
   const watchIdRef = useRef<number | null>(null);
+  const wakeLockRef = useRef<any>(null);
+
+  // Request WakeLock to keep screen awake during delivery
+  const acquireWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      }
+    } catch (err) {
+      // Ignore wake lock rejection
+    }
+  };
+
+  const releaseWakeLock = () => {
+    try {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    } catch (err) {
+      // Ignore
+    }
+  };
 
   // Sync rider profile from Firestore
   useEffect(() => {
@@ -72,7 +125,6 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
       snapshot.forEach((d) => {
         allOrders.push({ id: d.id, ...d.data() } as Order);
       });
-      // Filter for active delivery orders or all for simulation
       allOrders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setOrders(allOrders);
       if (selectedOrder) {
@@ -85,60 +137,129 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
     return () => unsubscribe();
   }, [selectedOrder?.id]);
 
-  // GPS broadcasting
+  // Real GPS broadcasting via navigator.geolocation.watchPosition
   const startLiveLocationBroadcast = (orderId?: string) => {
     if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your device.');
+      toast.error('Geolocation is not supported by your device/browser.');
       return;
     }
 
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+
     setIsBroadcastingLocation(true);
-    toast.success('Live GPS Sharing Started 📍', { id: 'gps-toast' });
+    acquireWakeLock();
+    toast.success('Live GPS Transmission Started 📍 (Broadcasting to Customer)', { id: 'gps-toast', duration: 3500 });
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (position) => {
-        const { latitude, longitude, heading, speed } = position.coords;
+        const { latitude, longitude, heading, speed, accuracy } = position.coords;
         const now = new Date().toISOString();
+        const speedKmh = speed ? Math.round(speed * 3.6) : 0;
+        const accMeters = Math.round(accuracy || 0);
 
-        // Update target order if selected or all active out-for-delivery orders
+        setCurrentGpsStats(prev => ({
+          lat: latitude,
+          lng: longitude,
+          accuracy: accMeters,
+          speed: speedKmh,
+          heading: heading ? Math.round(heading) : undefined,
+          lastPing: new Date().toLocaleTimeString(),
+          updateCount: prev.updateCount + 1
+        }));
+
+        // Broadcast to specific order or all active 'Out for Delivery' orders
         const targetOrders = orderId ? orders.filter(o => o.id === orderId) : orders.filter(o => o.status === 'Out for Delivery');
 
         for (const ord of targetOrders) {
           try {
+            // 1. Dedicated liveLocations/{orderId} high-frequency channel
+            await setDoc(doc(db, 'liveLocations', ord.id), {
+              orderId: ord.id,
+              riderId: activePartner.id,
+              riderName: activePartner.name,
+              riderPhone: activePartner.phone,
+              lat: latitude,
+              lng: longitude,
+              heading: heading || 0,
+              speed: speedKmh,
+              accuracy: accMeters,
+              updatedAt: now,
+              status: 'active'
+            }, { merge: true });
+
+            // 2. Sync to orders/{orderId} deliveryLocation
             await updateDoc(doc(db, 'orders', ord.id), {
               deliveryLocation: {
                 lat: latitude,
                 lng: longitude,
                 heading: heading || 0,
-                speed: speed || 0,
+                speed: speedKmh,
+                accuracy: accMeters,
                 updatedAt: now
               }
             });
           } catch (err) {
-            console.error('Error updating live GPS for order:', ord.id, err);
+            console.error('Error broadcasting live GPS for order:', ord.id, err);
           }
+        }
+
+        // Update rider profile location
+        try {
+          if (activePartner.id) {
+            await setDoc(doc(db, 'deliveryPartners', activePartner.id), {
+              ...activePartner,
+              location: {
+                lat: latitude,
+                lng: longitude,
+                heading: heading || 0,
+                speed: speedKmh,
+                accuracy: accMeters,
+                updatedAt: now
+              },
+              status: 'active',
+              isActive: true
+            }, { merge: true });
+          }
+        } catch (e) {
+          // ignore
         }
       },
       (error) => {
         console.warn('Geolocation error:', error.message);
-        toast.error('GPS signal weak or permission denied.');
-        setIsBroadcastingLocation(false);
+        let msg = 'GPS signal interrupted.';
+        if (error.code === error.PERMISSION_DENIED) {
+          msg = 'Location permission denied. Please allow GPS access in settings.';
+          setIsBroadcastingLocation(false);
+        }
+        toast.error(msg, { id: 'gps-err' });
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 2000
+        maximumAge: 1000
       }
     );
   };
 
-  const stopLiveLocationBroadcast = () => {
+  const stopLiveLocationBroadcast = (orderId?: string) => {
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    releaseWakeLock();
     setIsBroadcastingLocation(false);
     toast('Live GPS Sharing Stopped', { icon: '🛑' });
+
+    if (orderId) {
+      try {
+        updateDoc(doc(db, 'liveLocations', orderId), {
+          status: 'completed',
+          endedAt: new Date().toISOString()
+        }).catch(() => {});
+      } catch (e) {}
+    }
   };
 
   useEffect(() => {
@@ -146,6 +267,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
+      releaseWakeLock();
     };
   }, []);
 
@@ -157,10 +279,13 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
       });
       toast.success(`Order status updated to ${newStatus}! 🚀`);
       
-      if (newStatus === 'Out for Delivery' && !isBroadcastingLocation) {
+      if (newStatus === 'Out for Delivery') {
         startLiveLocationBroadcast(orderId);
       } else if (newStatus === 'Delivered') {
+        stopLiveLocationBroadcast(orderId);
         toast.success('Great job on delivering this order! 🎉');
+      } else if (newStatus === 'Cancelled') {
+        stopLiveLocationBroadcast(orderId);
       }
     } catch (e: any) {
       console.error(e);
@@ -198,6 +323,9 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
           <button
             onClick={() => {
               setIsOnline(!isOnline);
+              if (isOnline && isBroadcastingLocation) {
+                stopLiveLocationBroadcast();
+              }
               toast(isOnline ? 'You are now OFFLINE' : 'You are now ONLINE & ready for orders!', {
                 icon: isOnline ? '🔴' : '🟢'
               });
@@ -216,38 +344,75 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
         
-        {/* GPS Location Broadcaster Card */}
-        <div className="p-4 rounded-2xl bg-[#1f1f23] border border-white/10 shadow-md flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isBroadcastingLocation ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-white/5 text-gray-400'}`}>
-              <Radio className="w-5 h-5" />
+        {/* Real-time GPS Telemetry Broadcaster Card */}
+        <div className="p-5 rounded-2xl bg-[#1f1f23] border border-white/10 shadow-xl space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${isBroadcastingLocation ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-white/5 text-gray-400'}`}>
+                <Radio className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  Real GPS Live Broadcaster
+                  {isBroadcastingLocation && (
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                  )}
+                </h3>
+                <p className="text-xs text-gray-400">
+                  {isBroadcastingLocation 
+                    ? `Broadcasting real-time coordinates to customer live map` 
+                    : 'Start broadcasting your device GPS when out for delivery'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-sm text-white flex items-center gap-2">
-                Live GPS Broadcast
-                {isBroadcastingLocation && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                )}
-              </h3>
-              <p className="text-xs text-gray-400">
-                {isBroadcastingLocation 
-                  ? 'Transmitting live coordinates to customer tracking map' 
-                  : 'Enable live GPS when you are out for delivery'}
-              </p>
-            </div>
+
+            <button
+              onClick={() => isBroadcastingLocation ? stopLiveLocationBroadcast() : startLiveLocationBroadcast()}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+                isBroadcastingLocation
+                  ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
+                  : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+              }`}
+            >
+              <Radio className="w-4 h-4" />
+              <span>{isBroadcastingLocation ? 'Stop Live GPS' : 'Start Live GPS Broadcast'}</span>
+            </button>
           </div>
 
-          <button
-            onClick={() => isBroadcastingLocation ? stopLiveLocationBroadcast() : startLiveLocationBroadcast()}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
-              isBroadcastingLocation
-                ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
-                : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>{isBroadcastingLocation ? 'Stop Sharing GPS' : 'Start Live GPS Broadcast'}</span>
-          </button>
+          {/* Live GPS Diagnostics bar */}
+          {isBroadcastingLocation && currentGpsStats.lat && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-white/10 text-xs">
+              <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 text-[10px] uppercase font-bold block">GPS Coords</span>
+                <span className="font-mono font-bold text-emerald-400">
+                  {currentGpsStats.lat.toFixed(4)}, {currentGpsStats.lng?.toFixed(4)}
+                </span>
+              </div>
+              <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 text-[10px] uppercase font-bold block">Accuracy</span>
+                <span className="font-mono font-bold text-emerald-300">
+                  ±{currentGpsStats.accuracy || 5} meters
+                </span>
+              </div>
+              <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 text-[10px] uppercase font-bold block">Speed</span>
+                <span className="font-mono font-bold text-white">
+                  {currentGpsStats.speed || 0} km/h
+                </span>
+              </div>
+              <div className="bg-black/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-400 text-[10px] uppercase font-bold block">Transmitted Pings</span>
+                <span className="font-mono font-bold text-blue-400">
+                  #{currentGpsStats.updateCount} ({currentGpsStats.lastPing || 'Now'})
+                </span>
+              </div>
+            </div>
+          )}
+          
+          <div className="text-[11px] text-gray-400 bg-white/5 p-2.5 rounded-xl flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Keep this screen awake or mobile mounted for continuous live GPS tracking.</span>
+          </div>
         </div>
 
         {/* Quick Stats Grid */}
@@ -323,16 +488,33 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
                         <span className="font-bold text-white">{order.paymentMethod}</span>
                       </div>
 
-                      {/* Quick Call Customer */}
-                      {order.address.phone && (
-                        <a
-                          href={`tel:${order.address.phone}`}
-                          className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors"
+                      {/* Quick Call & Message Customer */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setChatOrder(order)}
+                          className="inline-flex items-center gap-1.5 bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer border border-blue-500/30"
                         >
-                          <Phone className="w-3.5 h-3.5" />
-                          <span>Call: {order.address.phone}</span>
-                        </a>
-                      )}
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Chat Customer</span>
+                        </button>
+                        {order.address.phone && (
+                          <button
+                            type="button"
+                            onClick={() => setCallModalData({
+                              isOpen: true,
+                              targetRole: 'customer',
+                              targetName: `${order.address.firstName || order.address.name || 'Customer'}`,
+                              targetPhone: order.address.phone || '',
+                              orderId: order.id
+                            })}
+                            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                            <span>Call</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -349,7 +531,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
                     {order.status === 'Pending' || order.status === 'Restaurant Accepted' ? (
                       <button
                         onClick={() => handleUpdateStatus(order.id, 'Preparing')}
-                        className="flex-1 py-2.5 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-xl text-xs transition-all text-center shadow-md"
+                        className="flex-1 py-2.5 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-xl text-xs transition-all text-center shadow-md cursor-pointer"
                       >
                         Accept & Start Preparing
                       </button>
@@ -358,7 +540,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
                     {order.status === 'Preparing' ? (
                       <button
                         onClick={() => handleUpdateStatus(order.id, 'Ready for Pickup')}
-                        className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition-all text-center shadow-md"
+                        className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition-all text-center shadow-md cursor-pointer"
                       >
                         Food Ready for Pickup
                       </button>
@@ -367,7 +549,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
                     {order.status === 'Ready for Pickup' ? (
                       <button
                         onClick={() => handleUpdateStatus(order.id, 'Out for Delivery')}
-                        className="flex-1 py-2.5 bg-gradient-to-r from-[#E23744] to-orange-500 hover:opacity-90 text-white font-black rounded-xl text-xs transition-all text-center shadow-md flex items-center justify-center gap-2"
+                        className="flex-1 py-2.5 bg-gradient-to-r from-[#E23744] to-orange-500 hover:opacity-90 text-white font-black rounded-xl text-xs transition-all text-center shadow-md flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <Bike className="w-4 h-4" />
                         <span>Picked Up & Start Delivery (Live GPS)</span>
@@ -381,7 +563,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
                           href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${order.address.address || ''}, ${order.address.city || ''}`)}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <Navigation className="w-3.5 h-3.5" />
                           <span>Google Maps Nav</span>
@@ -389,7 +571,7 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
 
                         <button
                           onClick={() => handleUpdateStatus(order.id, 'Delivered')}
-                          className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           <span>Mark as Delivered ✓</span>
@@ -429,6 +611,36 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
         )}
 
       </div>
+
+      {/* Real-time Order Chat Modal */}
+      {chatOrder && (
+        <OrderChatModal
+          order={chatOrder}
+          currentUserRole="rider"
+          currentUserId={activePartner.id || auth.currentUser?.uid || 'rider-uid'}
+          currentUserName={activePartner.name}
+          onClose={() => setChatOrder(null)}
+          onInitiateCall={(role, phone, name) => {
+            setCallModalData({
+              isOpen: true,
+              targetRole: role,
+              targetName: name,
+              targetPhone: phone,
+              orderId: chatOrder.id
+            });
+          }}
+        />
+      )}
+
+      {/* Secure Cellular Call Modal */}
+      <CallModal
+        isOpen={callModalData.isOpen}
+        onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
+        targetRole={callModalData.targetRole}
+        targetName={callModalData.targetName}
+        targetPhone={callModalData.targetPhone}
+        orderId={callModalData.orderId}
+      />
     </div>
   );
 }

@@ -521,11 +521,34 @@ function OrderDetailView({
                 </p>
               </div>
 
-              <div className="flex gap-2.5">
+              <div className="flex flex-wrap gap-2.5">
+                {/* Cancel Order button if order state allows */}
+                {['Pending', 'Restaurant Accepted'].includes(order.status) && (
+                  <button
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to cancel this order?')) {
+                        try {
+                          await updateDoc(doc(db, 'orders', order.id), {
+                            status: 'Cancelled',
+                            cancelReason: 'Cancelled by customer request',
+                            updatedAt: new Date().toISOString()
+                          });
+                          toast.success('Order cancelled successfully.');
+                        } catch (err: any) {
+                          toast.error('Could not cancel order: ' + err.message);
+                        }
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors cursor-pointer"
+                  >
+                    Cancel Order
+                  </button>
+                )}
+
                 {onReorder && (
                   <button
                     onClick={handleReorderClick}
-                    className="px-4 py-2 bg-[#E23744]/10 text-[#E23744] border border-[#E23744]/30 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-[#E23744]/20 transition-colors"
+                    className="px-4 py-2 bg-[#E23744]/10 text-[#E23744] border border-[#E23744]/30 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-[#E23744]/20 transition-colors cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                     Reorder Items
@@ -534,7 +557,7 @@ function OrderDetailView({
 
                 <button
                   onClick={() => setShowInvoice(true)}
-                  className="px-4 py-2 bg-blue-50 dark:bg-blue-500/10 text-[#2874f0] border border-blue-200 dark:border-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors"
+                  className="px-4 py-2 bg-blue-50 dark:bg-blue-500/10 text-[#2874f0] border border-blue-200 dark:border-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors cursor-pointer"
                 >
                   <FileText className="w-4 h-4" />
                   Invoice

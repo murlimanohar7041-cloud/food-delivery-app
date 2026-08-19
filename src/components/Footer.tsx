@@ -2,12 +2,16 @@ import React, { useState } from 'react';
 import { Instagram, Twitter, Facebook, Youtube } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
-export default function Footer() {
+interface FooterProps {
+  onOpenRiderPortal?: () => void;
+}
+
+export default function Footer({ onOpenRiderPortal }: FooterProps) {
   const [email, setEmail] = useState('');
 
   const handleJoin = () => {
     if (!email) {
-      toast.error('Please enter your emailaddress');
+      toast.error('Please enter your email address');
       return;
     }
     
@@ -28,11 +32,10 @@ export default function Footer() {
         {/* Brand & Socials */}
         <div className="flex-1 max-w-sm">
           <h2 className="text-[#e6c79a] text-2xl font-semibold mb-6 tracking-wide">
-            NEXRA
+            M-BITES
           </h2>
           <p className="text-sm leading-relaxed mb-8">
-            Elevating your food delivery experience since 2024. 
-            Premium meals, exclusive local drops, and unparalleled taste.
+            Elevating your food delivery experience with real-time GPS tracking, fresh gourmet meals, and superfast deliveries.
           </p>
           <div className="flex gap-5">
             <a href="#" className="hover:text-white transition-colors">
@@ -61,14 +64,24 @@ export default function Footer() {
           </ul>
         </div>
 
-        {/* Support */}
+        {/* Support & Partner */}
         <div className="flex-1 max-w-[200px]">
           <h3 className="text-white font-bold mb-6 tracking-wide text-sm">SUPPORT</h3>
           <ul className="space-y-4 text-sm">
             <li><a href="#" className="hover:text-white transition-colors">FAQ</a></li>
             <li><a href="#" className="hover:text-white transition-colors">Delivery Policy</a></li>
             <li><a href="#" className="hover:text-white transition-colors">Refunds</a></li>
-            <li><a href="#" className="hover:text-white transition-colors">Contact Us</a></li>
+            {onOpenRiderPortal && (
+              <li>
+                <button 
+                  onClick={onOpenRiderPortal}
+                  className="hover:text-amber-400 transition-colors text-left flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Delivery Partner Fleet</span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono">Rider</span>
+                </button>
+              </li>
+            )}
           </ul>
         </div>
 

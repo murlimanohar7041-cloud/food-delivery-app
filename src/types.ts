@@ -5,6 +5,8 @@ export interface CartItem {
   quantity: number;
   isVeg: boolean;
   image?: string;
+  category?: string;
+  description?: string;
 }
 
 export interface Address {
@@ -25,13 +27,15 @@ export interface LocationCoords {
   lat: number;
   lng: number;
   address?: string;
+  accuracy?: number;
 }
 
 export interface RestaurantLocation extends LocationCoords {
   name?: string;
+  phone?: string;
 }
 
-export type UserRole = 'customer' | 'admin' | 'rider';
+export type UserRole = 'customer' | 'admin' | 'rider' | 'restaurant';
 
 export interface UserProfile {
   id: string;
@@ -43,6 +47,8 @@ export interface UserProfile {
   city?: string;
   pincode?: string;
   location?: LocationCoords;
+  vehicleNumber?: string;
+  vehicleType?: 'bike' | 'scooter' | 'ev';
   createdAt?: string;
   blocked?: boolean;
   totalOrders?: number;
@@ -69,7 +75,22 @@ export interface DeliveryLocation {
   lng: number;
   heading?: number;
   speed?: number;
+  accuracy?: number;
   updatedAt?: string;
+}
+
+export interface LiveLocation {
+  orderId: string;
+  riderId?: string;
+  riderName?: string;
+  riderPhone?: string;
+  lat: number;
+  lng: number;
+  heading?: number;
+  speed?: number;
+  accuracy?: number;
+  updatedAt: string;
+  status?: 'active' | 'completed' | 'cancelled';
 }
 
 export interface ETAInfo {
@@ -87,6 +108,24 @@ export type OrderStatus =
   | 'Delivered' 
   | 'Cancelled';
 
+export interface OrderStatusHistoryEntry {
+  status: OrderStatus;
+  timestamp: string;
+  note?: string;
+  updatedBy?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  orderId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'customer' | 'rider' | 'restaurant';
+  text: string;
+  createdAt: string;
+  read?: boolean;
+}
+
 export interface Order {
   id: string;
   userId?: string;
@@ -97,11 +136,18 @@ export interface Order {
   date: string;
   address: Address;
   paymentMethod: string;
+  paymentStatus?: 'paid' | 'pending' | 'failed' | 'cod';
+  paymentGateway?: 'razorpay' | 'stripe' | 'cod' | 'upi_direct';
+  paymentTransactionId?: string;
   restaurantName?: string;
+  restaurantPhone?: string;
   customerLocation?: LocationCoords;
-  restaurantLocation?: LocationCoords & { name?: string };
+  restaurantLocation?: LocationCoords & { name?: string; phone?: string };
   deliveryLocation?: DeliveryLocation;
   deliveryPartner?: DeliveryPartner;
   eta?: ETAInfo;
   deliveryBoyId?: string;
+  statusHistory?: OrderStatusHistoryEntry[];
+  cancelReason?: string;
+  notes?: string;
 }

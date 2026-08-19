@@ -17,6 +17,7 @@ import {
   Phone,
   KeyRound,
   ArrowRight,
+  ArrowLeft,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
@@ -41,11 +42,11 @@ interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin?: (name: string) => void;
-  initialMode?: 'login' | 'register' | 'admin' | 'rider';
+  initialMode?: 'login' | 'register' | 'rider';
   onNavigate?: (view: string) => void;
 }
 
-type ModalTab = 'customer-login' | 'register' | 'admin-login' | 'rider-login' | 'forgot-password';
+type ModalTab = 'customer-login' | 'register' | 'rider-login' | 'forgot-password';
 
 export default function ProfileModal({ 
   isOpen, 
@@ -75,10 +76,6 @@ export default function ProfileModal({
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
-  // Admin Login form state
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-
   // Rider Login form state
   const [riderIdentifier, setRiderIdentifier] = useState('');
   const [riderPassword, setRiderPassword] = useState('');
@@ -100,8 +97,6 @@ export default function ProfileModal({
   useEffect(() => {
     if (initialMode === 'register') {
       setActiveTab('register');
-    } else if (initialMode === 'admin') {
-      setActiveTab('admin-login');
     } else if (initialMode === 'rider') {
       setActiveTab('rider-login');
     } else {
@@ -153,20 +148,59 @@ export default function ProfileModal({
   // GPS auto-detect for registration
   const handleDetectGpsLocation = async () => {
     setIsDetectingGps(true);
-    toast.loading('Detecting your live GPS coordinates...', { id: 'gps-toast' });
+    toast.loading('Detecting your live GPS location & address...', { id: 'gps-toast' });
     try {
-      const res = await getUserCurrentLocation();
+      const res = await getUserCurrentLocation({ timeoutMs: 15000 });
       toast.dismiss('gps-toast');
       if (res.coords) {
         setRegLocation(res.coords);
-        if (!regCity) setRegCity('Current Location');
-        toast.success('Live Location Permission Granted! 📍');
+        
+        if (res.coords.structuredAddress) {
+          const st = res.coords.structuredAddress;
+          setRegAddress(st.street || st.formattedAddress);
+          if (st.city) setRegCity(st.city);
+          if (st.pincode) setRegPincode(st.pincode);
+        } else if (res.coords.address) {
+          setRegAddress(res.coords.address);
+          if (!regCity) setRegCity('Current Location');
+        }
+
+        const accuracyText = res.coords.accuracy ? ` (±${res.coords.accuracy}m)` : '';
+        toast.success(`Live GPS & Address attached!${accuracyText} 📍`);
       } else if (res.error) {
         toast.error(res.error, { duration: 4000 });
       }
     } catch (e: any) {
       toast.dismiss('gps-toast');
       toast.error('Location error. Please grant permission or enter manually.');
+    } finally {
+      setIsDetectingGps(false);
+    }
+  };
+
+  // GPS auto-detect for editing profile address
+  const handleDetectProfileGpsLocation = async () => {
+    setIsDetectingGps(true);
+    toast.loading('Acquiring current GPS location...', { id: 'edit-gps-toast' });
+    try {
+      const res = await getUserCurrentLocation({ timeoutMs: 15000 });
+      toast.dismiss('edit-gps-toast');
+      if (res.coords) {
+        if (res.coords.structuredAddress) {
+          const st = res.coords.structuredAddress;
+          setEditAddress(st.street || st.formattedAddress);
+          if (st.city) setEditCity(st.city);
+          if (st.pincode) setEditPincode(st.pincode);
+        } else if (res.coords.address) {
+          setEditAddress(res.coords.address);
+        }
+        toast.success('Address populated from live GPS! 📍');
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+    } catch (e) {
+      toast.dismiss('edit-gps-toast');
+      toast.error('Failed to detect GPS location.');
     } finally {
       setIsDetectingGps(false);
     }
@@ -180,13 +214,15 @@ export default function ProfileModal({
       if (result.user) {
         const userDocRef = doc(db, 'users', result.user.uid);
         const snap = await getDoc(userDocRef);
-        let userRole: UserRole = result.user.email?.toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase() ? 'admin' : 'customer';
+        const emailLower = (result.user.email || '').toLowerCase();
+        const isBootstrapAdmin = emailLower === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
+        let userRole: UserRole = isBootstrapAdmin ? 'admin' : 'customer';
         
         if (!snap.exists()) {
           const newProf: UserProfile = {
             id: result.user.uid,
             name: result.user.displayName || 'Customer',
-            email: (result.user.email || '').toLowerCase(),
+            email: emailLower,
             role: userRole,
             createdAt: new Date().toISOString(),
             blocked: false,
@@ -201,17 +237,26 @@ export default function ProfileModal({
             toast.error('Your account has been suspended by the administrator.');
             return;
           }
+          if (isBootstrapAdmin && existingData.role !== 'admin') {
+            await updateDoc(userDocRef, { role: 'admin' });
+            existingData.role = 'admin';
+          }
           userRole = existingData.role || userRole;
           setUserProfile(existingData);
         }
 
         const nameToGreet = result.user.displayName || 'Customer';
         onLogin?.(nameToGreet);
-        toast.success(`Welcome back, ${nameToGreet}! 👋`);
         onClose();
 
         if (userRole === 'admin') {
+          toast.success(`Admin access verified! Opening Admin Dashboard 🛡️`);
           onNavigate?.('admin');
+        } else if (userRole === 'rider') {
+          toast.success(`Delivery partner verified! Opening Rider Portal 🛵`);
+          onNavigate?.('rider');
+        } else {
+          toast.success(`Welcome back, ${nameToGreet}! 👋`);
         }
       }
     } catch (error: any) {
@@ -274,9 +319,15 @@ export default function ProfileModal({
 
       await setDoc(doc(db, 'users', user.uid), customerProfile);
       setUserProfile(customerProfile);
-      toast.success(`Registration successful! Welcome to M-Bites, ${regFullName.trim()} 🎉`);
       onLogin?.(regFullName.trim());
       onClose();
+
+      if (isBootstrapAdmin) {
+        toast.success(`Admin account registered! Opening Admin Dashboard 🛡️`);
+        onNavigate?.('admin');
+      } else {
+        toast.success(`Registration successful! Welcome to M-Bites, ${regFullName.trim()} 🎉`);
+      }
     } catch (error: any) {
       console.error('Registration failed:', error);
       toast.error(getAuthErrorMessage(error));
@@ -302,10 +353,13 @@ export default function ProfileModal({
       const resolvedEmail = await resolveEmailFromIdentifier(loginIdentifier);
       const userCred = await signInWithEmailAndPassword(auth, resolvedEmail, loginPassword);
       const user = userCred.user;
+      const isBootstrapAdmin = (user.email || '').toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
 
       // Verify Firestore profile
       const userDocRef = doc(db, 'users', user.uid);
       const snap = await getDoc(userDocRef);
+      let userRole: UserRole = isBootstrapAdmin ? 'admin' : 'customer';
+
       if (snap.exists()) {
         const prof = snap.data() as UserProfile;
         if (prof.blocked) {
@@ -313,69 +367,41 @@ export default function ProfileModal({
           toast.error('This account is suspended. Please contact support.');
           return;
         }
+        if (isBootstrapAdmin && prof.role !== 'admin') {
+          await updateDoc(userDocRef, { role: 'admin' });
+          prof.role = 'admin';
+        }
+        userRole = prof.role || userRole;
         setUserProfile(prof);
-      }
-      
-      const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'Customer');
-      onLogin?.(displayName);
-      toast.success(`Welcome back, ${displayName}! 🍔`);
-      onClose();
-    } catch (error: any) {
-      console.error('Customer Login error:', error);
-      toast.error(getAuthErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Admin Login
-  const handleAdminLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adminEmail.trim() || !adminPassword) {
-      toast.error('Please enter Admin email and password');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const email = adminEmail.trim().toLowerCase();
-      const userCred = await signInWithEmailAndPassword(auth, email, adminPassword);
-      const user = userCred.user;
-
-      // Verify Admin Role in Firestore
-      const userDocRef = doc(db, 'users', user.uid);
-      const snap = await getDoc(userDocRef);
-      let isAllowed = email === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
-
-      if (snap.exists()) {
-        const prof = snap.data() as UserProfile;
-        if (prof.role === 'admin') isAllowed = true;
-        setUserProfile(prof);
-      } else if (isAllowed) {
+      } else if (isBootstrapAdmin) {
         const adminProf: UserProfile = {
           id: user.uid,
-          name: user.displayName || 'Admin Master',
-          email,
+          name: user.displayName || 'Administrator',
+          email: user.email || ADMIN_BOOTSTRAP_EMAIL,
           role: 'admin',
           createdAt: new Date().toISOString(),
-          blocked: false
+          blocked: false,
+          totalOrders: 0
         };
         await setDoc(userDocRef, adminProf);
         setUserProfile(adminProf);
       }
-
-      if (!isAllowed) {
-        await signOut(auth);
-        toast.error('Access Denied: This account does not have Admin privileges.');
-        return;
-      }
-
-      toast.success('Admin authentication verified! Opening Admin Command Center 🛡️');
-      onLogin?.(user.displayName || 'Administrator');
+      
+      const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'Customer');
+      onLogin?.(displayName);
       onClose();
-      onNavigate?.('admin');
+
+      if (userRole === 'admin') {
+        toast.success(`Admin clearance verified! Opening Admin Dashboard 🛡️`);
+        onNavigate?.('admin');
+      } else if (userRole === 'rider') {
+        toast.success(`Delivery partner verified! Opening Rider Portal 🛵`);
+        onNavigate?.('rider');
+      } else {
+        toast.success(`Welcome back, ${displayName}! 🍔`);
+      }
     } catch (error: any) {
-      console.error('Admin Login error:', error);
+      console.error('Customer Login error:', error);
       toast.error(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
@@ -583,10 +609,21 @@ export default function ProfileModal({
                         className="w-full mt-1 px-3 py-2 rounded-xl bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/10 text-sm font-medium text-gray-900 dark:text-white outline-none focus:border-[#E23744]"
                       />
                     </div>
+                    
+                    <button
+                      type="button"
+                      onClick={handleDetectProfileGpsLocation}
+                      disabled={isDetectingGps}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-xs font-bold transition-all cursor-pointer"
+                    >
+                      <Locate className={`w-3.5 h-3.5 ${isDetectingGps ? 'animate-spin' : ''}`} />
+                      <span>{isDetectingGps ? 'Acquiring GPS...' : 'Auto-Detect Address via Live GPS'}</span>
+                    </button>
+
                     <button 
                       onClick={handleSaveProfile}
                       disabled={loading}
-                      className="w-full mt-2 bg-[#E23744] hover:bg-[#d12c38] text-white py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
+                      className="w-full mt-2 bg-[#E23744] hover:bg-[#d12c38] text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
                     >
                       <Save className="w-3.5 h-3.5" />
                       Save Address
@@ -698,56 +735,51 @@ export default function ProfileModal({
             </div>
           ) : (
             /* ========================================================= */
-            /* UN-AUTHENTICATED: LOGIN / REGISTER / ADMIN / RIDER VIEWS */
+            /* UN-AUTHENTICATED: LOGIN / REGISTER / RIDER VIEWS          */
             /* ========================================================= */
             <>
-              {/* Modern Multi-Role Tab Selector */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-gray-100 dark:bg-[#0a0a0a] p-1.5 rounded-2xl mb-6 border border-black/5 dark:border-white/5">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('customer-login')}
-                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
-                    activeTab === 'customer-login'
-                      ? 'bg-white dark:bg-[#1f1f1f] text-gray-900 dark:text-white shadow-md'
-                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  Customer Login
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('register')}
-                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
-                    activeTab === 'register'
-                      ? 'bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white shadow-md shadow-red-500/20'
-                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  Register
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('admin-login')}
-                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
-                    activeTab === 'admin-login'
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  Admin Portal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('rider-login')}
-                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all truncate text-center cursor-pointer ${
-                    activeTab === 'rider-login'
-                      ? 'bg-amber-500 text-black font-extrabold shadow-md shadow-amber-500/20'
-                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                >
-                  Rider Login
-                </button>
-              </div>
+              {/* Dedicated Partner / Rider Login Back-Button */}
+              {activeTab === 'rider-login' ? (
+                <div className="mb-6 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('customer-login')}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>Back to Customer Sign In</span>
+                  </button>
+                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-mono">
+                    FLEET PORTAL
+                  </span>
+                </div>
+              ) : activeTab !== 'forgot-password' ? (
+                /* Sleek 2-segment Customer Switcher */
+                <div className="grid grid-cols-2 gap-2 bg-gray-100 dark:bg-[#0a0a0a] p-1.5 rounded-2xl mb-6 border border-black/5 dark:border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('customer-login')}
+                    className={`py-2.5 px-3 text-xs font-extrabold rounded-xl transition-all text-center cursor-pointer ${
+                      activeTab === 'customer-login'
+                        ? 'bg-white dark:bg-[#1f1f1f] text-gray-900 dark:text-white shadow-md'
+                        : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('register')}
+                    className={`py-2.5 px-3 text-xs font-extrabold rounded-xl transition-all text-center cursor-pointer ${
+                      activeTab === 'register'
+                        ? 'bg-gradient-to-r from-[#E23744] to-[#FF5E5E] text-white shadow-md shadow-red-500/20'
+                        : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                  >
+                    Create Account
+                  </button>
+                </div>
+              ) : null}
 
               {/* ------------------------------------------------------------- */}
               {/* TAB 1: CUSTOMER LOGIN                                         */}
@@ -1040,95 +1072,7 @@ export default function ProfileModal({
               )}
 
               {/* ------------------------------------------------------------- */}
-              {/* TAB 3: ADMIN PORTAL LOGIN                                     */}
-              {/* ------------------------------------------------------------- */}
-              {activeTab === 'admin-login' && (
-                <div>
-                  <div className="mb-5">
-                    <div className="flex items-center gap-2 text-blue-500 font-black text-xs uppercase tracking-wider mb-1">
-                      <ShieldCheck className="w-4 h-4" />
-                      Secure Staff Portal
-                    </div>
-                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
-                      Admin Command Center 🛡️
-                    </h2>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      Sign in with administrator credentials to manage live orders, menu, customers, riders, and kitchen GPS.
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleAdminLogin} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                        Admin Email Address
-                      </label>
-                      <div className="relative">
-                        <input 
-                          type="email" 
-                          required
-                          value={adminEmail}
-                          onChange={(e) => setAdminEmail(e.target.value)}
-                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
-                          placeholder="murlimanohar7041@gmail.com" 
-                        />
-                        <Mail className="w-4 h-4 text-blue-400 absolute left-3.5 top-3.5" />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Admin Password</label>
-                        <button 
-                          type="button" 
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="text-xs text-blue-500 hover:underline font-bold cursor-pointer"
-                        >
-                          {showPassword ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-                      <div className="relative">
-                        <input 
-                          type={showPassword ? 'text' : 'password'}
-                          required
-                          value={adminPassword}
-                          onChange={(e) => setAdminPassword(e.target.value)}
-                          className="w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
-                          placeholder="••••••••" 
-                        />
-                        <Lock className="w-4 h-4 text-blue-400 absolute left-3.5 top-3.5" />
-                        <button 
-                          type="button" 
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
-                        >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit" 
-                      disabled={loading}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3.5 rounded-xl shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      {loading ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Verifying Security Clearance...</span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-5 h-5" />
-                          <span>Authenticate & Open Admin Console</span>
-                        </>
-                      )}
-                    </button>
-                  </form>
-                </div>
-              )}
-
-              {/* ------------------------------------------------------------- */}
-              {/* TAB 4: RIDER (DELIVERY BOY) LOGIN                             */}
+              {/* TAB 2: RIDER (DELIVERY BOY) LOGIN                             */}
               {/* ------------------------------------------------------------- */}
               {activeTab === 'rider-login' && (
                 <div>

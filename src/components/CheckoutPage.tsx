@@ -149,15 +149,26 @@ export default function CheckoutPage({
 
   const handleDetectLocation = async () => {
     setIsDetectingLocation(true);
-    toast.loading('Detecting your live location...', { id: 'loc-toast' });
+    toast.loading('Acquiring high-precision GPS location...', { id: 'loc-toast' });
     try {
-      const res = await getUserCurrentLocation();
+      const res = await getUserCurrentLocation({ timeoutMs: 15000 });
       toast.dismiss('loc-toast');
       if (res.coords) {
         setCustomerLocation(res.coords);
-        if (!city) setCity('Current Location');
-        if (!address) setAddress(`Lat: ${res.coords.lat.toFixed(4)}, Lng: ${res.coords.lng.toFixed(4)}`);
-        toast.success('Live GPS location detected successfully! 📍');
+        
+        // Populate real address fields if structured geocoding is available
+        if (res.coords.structuredAddress) {
+          const st = res.coords.structuredAddress;
+          setAddress(st.street || st.formattedAddress);
+          if (st.city) setCity(st.city);
+          if (st.pincode) setZipCode(st.pincode);
+        } else if (res.coords.address) {
+          setAddress(res.coords.address);
+          if (!city) setCity('Current Location');
+        }
+
+        const accuracyText = res.coords.accuracy ? ` (±${res.coords.accuracy}m)` : '';
+        toast.success(`Live GPS location acquired!${accuracyText} 📍`);
       } else if (res.error) {
         toast.error(res.error, { duration: 4000 });
       }
@@ -352,12 +363,39 @@ export default function CheckoutPage({
                   type="button"
                   onClick={handleDetectLocation}
                   disabled={isDetectingLocation}
-                  className="flex items-center gap-2 text-xs font-bold text-[#E23744] bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 px-3 py-2 rounded-xl transition-all border border-red-200 dark:border-red-500/20"
+                  className={`flex items-center gap-2 text-xs font-bold px-3.5 py-2 rounded-xl transition-all border ${
+                    customerLocation 
+                      ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/30' 
+                      : 'bg-red-50 dark:bg-red-500/10 text-[#E23744] hover:bg-red-100 dark:hover:bg-red-500/20 border-red-200 dark:border-red-500/20'
+                  }`}
                 >
                   <Locate className={`w-3.5 h-3.5 ${isDetectingLocation ? 'animate-spin' : ''}`} />
-                  {customerLocation ? '📍 Location Attached' : 'Auto-Detect Live GPS'}
+                  {isDetectingLocation 
+                    ? 'Acquiring GPS...' 
+                    : customerLocation 
+                      ? '📍 GPS Verified' 
+                      : 'Auto-Detect Live GPS'}
                 </button>
               </div>
+
+              {customerLocation && (
+                <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="truncate">
+                      <strong>GPS Attached:</strong> {customerLocation.lat.toFixed(5)}, {customerLocation.lng.toFixed(5)}
+                      {customerLocation.accuracy ? ` (±${customerLocation.accuracy}m)` : ''}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDetectLocation}
+                    className="text-[11px] underline font-bold hover:text-emerald-800 dark:hover:text-emerald-200 shrink-0 ml-2"
+                  >
+                    Refresh GPS
+                  </button>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

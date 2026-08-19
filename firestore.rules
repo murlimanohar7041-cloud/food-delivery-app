@@ -1,40 +1,82 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email == 'murlimanohar7041@gmail.com') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
     
-    // Allow connection test
+    // Connection test
     match /test/connection {
       allow read: if true;
     }
 
-    // User Profiles & Saved Addresses
+    // User Profiles & Saved Addresses (Customers cannot self-grant admin/rider role)
     match /users/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || ('email' in request.auth.token && request.auth.token.email == 'murlimanohar7041@gmail.com'));
-      allow create, update: if request.auth != null && (request.auth.uid == userId || ('email' in request.auth.token && request.auth.token.email == 'murlimanohar7041@gmail.com'));
-      allow delete: if request.auth != null && ('email' in request.auth.token && request.auth.token.email == 'murlimanohar7041@gmail.com');
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAuthenticated() && (
+        isAdmin() || 
+        (request.auth.uid == userId && 
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'blocked'])))
+      );
+      allow delete: if isAdmin();
     }
 
     // Delivery Partners Fleet
     match /deliveryPartners/{partnerId} {
-      allow read: if request.auth != null;
-      allow create, update, delete: if request.auth != null;
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
 
     // App & Kitchen Location Settings
     match /settings/{settingId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if isAuthenticated();
     }
 
-    // Orders Collection with Real-Time Delivery Tracking Support
+    // Orders Collection with Real-Time Delivery Tracking & Status History
     match /orders/{orderId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
-      allow update: if request.auth != null;
-      allow delete: if request.auth != null && ('email' in request.auth.token && request.auth.token.email == 'murlimanohar7041@gmail.com');
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+
+      // Real-time Chat Messages between Customer, Assigned Rider & Restaurant
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated();
+        allow update, delete: if isAuthenticated();
+      }
+    }
+
+    // High-Precision Real-Time GPS Tracking Collection per Order
+    match /liveLocations/{orderId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // Restaurant Menu Items
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
   }
 }

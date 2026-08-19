@@ -127,6 +127,25 @@
         }
       },
       "required": ["id", "userId", "userEmail", "total", "status", "date", "paymentMethod"]
+    },
+    "LiveLocation": {
+      "title": "LiveLocation",
+      "description": "High-frequency real-time GPS coordinates broadcasted by the active delivery partner for an order",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string" },
+        "riderId": { "type": "string" },
+        "riderName": { "type": "string" },
+        "riderPhone": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "heading": { "type": "number" },
+        "speed": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "updatedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "cancelled"] }
+      },
+      "required": ["orderId", "lat", "lng", "updatedAt"]
     }
   },
   "firestore": {
@@ -141,6 +160,10 @@
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/Order" },
       "description": "User placed orders with live location & delivery tracking"
+    },
+    "/liveLocations/{orderId}": {
+      "schema": { "$ref": "#/entities/LiveLocation" },
+      "description": "Real-time delivery partner GPS positions per order"
     }
   }
 }
