@@ -21,7 +21,8 @@ import {
   AlertCircle,
   CheckCircle2,
   RefreshCw,
-  LogOut
+  LogOut,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   signInWithPopup, 
@@ -36,17 +37,24 @@ import { auth, db, googleProvider } from '../firebase';
 import { toast } from 'react-hot-toast';
 import { getUserCurrentLocation } from '../utils/geoUtils';
 import { LocationCoords, UserProfile, UserRole } from '../types';
-import { getAuthErrorMessage, resolveEmailFromIdentifier, ADMIN_BOOTSTRAP_EMAIL, isUserAdmin, isUserRider } from '../utils/authUtils';
+import { 
+  getAuthErrorMessage, 
+  resolveEmailFromIdentifier, 
+  ADMIN_BOOTSTRAP_EMAIL, 
+  isUserAdmin, 
+  isUserRider,
+  cleanFirestoreObject 
+} from '../utils/authUtils';
 
 interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin?: (name: string) => void;
-  initialMode?: 'login' | 'register' | 'rider';
+  initialMode?: 'login' | 'register' | 'admin' | 'rider';
   onNavigate?: (view: string) => void;
 }
 
-type ModalTab = 'customer-login' | 'register' | 'rider-login' | 'forgot-password';
+type ModalTab = 'customer-login' | 'register' | 'rider-login' | 'admin-login' | 'forgot-password';
 
 export default function ProfileModal({ 
   isOpen, 
@@ -76,6 +84,10 @@ export default function ProfileModal({
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
+  // Admin Login form state
+  const [adminIdentifier, setAdminIdentifier] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+
   // Rider Login form state
   const [riderIdentifier, setRiderIdentifier] = useState('');
   const [riderPassword, setRiderPassword] = useState('');
@@ -95,10 +107,13 @@ export default function ProfileModal({
 
   // Sync mode when initialMode prop changes
   useEffect(() => {
+    if (!isOpen) return;
     if (initialMode === 'register') {
       setActiveTab('register');
     } else if (initialMode === 'rider') {
       setActiveTab('rider-login');
+    } else if (initialMode === 'admin') {
+      setActiveTab('admin-login');
     } else {
       setActiveTab('customer-login');
     }
@@ -122,8 +137,8 @@ export default function ProfileModal({
           setEditPincode(data.pincode || '');
           setEditPhone(data.phone || '');
         } else {
-          // If no doc exists yet, seed initial profile
-          const isAdmin = currentUser.email?.toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
+          // If no doc exists yet, seed initial clean profile
+          const isAdmin = (currentUser.email || '').toLowerCase() === ADMIN_BOOTSTRAP_EMAIL.toLowerCase();
           const basicProfile: UserProfile = {
             id: currentUser.uid,
             name: currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Customer'),
@@ -133,70 +148,71 @@ export default function ProfileModal({
             blocked: false,
             totalOrders: 0
           };
-          setUserProfile(basicProfile);
-          await setDoc(userDocRef, basicProfile);
+          const cleanProf = cleanFirestoreObject(basicProfile);
+          await setDoc(userDocRef, cleanProf);
+          setUserProfile(cleanProf);
         }
       } catch (err) {
-        console.error('Error fetching user profile:', err);
+        console.warn('User profile load notification:', err);
       }
     };
     loadProfile();
-  }, [currentUser, isOpen]);
+  }, [currentUser]);
 
   if (!isOpen) return null;
 
-  // GPS auto-detect for registration
+  // Auto-detect GPS during registration
   const handleDetectGpsLocation = async () => {
     setIsDetectingGps(true);
-    toast.loading('Detecting your live GPS location & address...', { id: 'gps-toast' });
+    toast.loading('Acquiring high-accuracy GPS coordinates...', { id: 'gps-toast' });
     try {
       const res = await getUserCurrentLocation({ timeoutMs: 15000 });
       toast.dismiss('gps-toast');
       if (res.coords) {
         setRegLocation(res.coords);
-        
         if (res.coords.structuredAddress) {
-          const st = res.coords.structuredAddress;
-          setRegAddress(st.street || st.formattedAddress);
-          if (st.city) setRegCity(st.city);
-          if (st.pincode) setRegPincode(st.pincode);
-        } else if (res.coords.address) {
+          const s = res.coords.structuredAddress;
+          if (s.road || s.houseNumber) {
+            setRegAddress([s.houseNumber, s.road, s.suburb].filter(Boolean).join(', '));
+          }
+          if (s.city) setRegCity(s.city);
+          if (s.postcode) setRegPincode(s.postcode);
+        } else if (res.coords.address && !regAddress) {
           setRegAddress(res.coords.address);
-          if (!regCity) setRegCity('Current Location');
         }
-
-        const accuracyText = res.coords.accuracy ? ` (±${res.coords.accuracy}m)` : '';
-        toast.success(`Live GPS & Address attached!${accuracyText} 📍`);
-      } else if (res.error) {
-        toast.error(res.error, { duration: 4000 });
+        toast.success(`📍 Precise GPS coordinates locked! (${res.coords.lat.toFixed(4)}, ${res.coords.lng.toFixed(4)})`);
+      } else {
+        toast.error(res.error || 'Could not lock GPS. Please fill address manually.');
       }
-    } catch (e: any) {
+    } catch (e) {
       toast.dismiss('gps-toast');
-      toast.error('Location error. Please grant permission or enter manually.');
+      toast.error('Failed to acquire GPS location.');
     } finally {
       setIsDetectingGps(false);
     }
   };
 
-  // GPS auto-detect for editing profile address
+  // Auto-detect GPS during Profile edit
   const handleDetectProfileGpsLocation = async () => {
     setIsDetectingGps(true);
-    toast.loading('Acquiring current GPS location...', { id: 'edit-gps-toast' });
+    toast.loading('Acquiring live GPS location...', { id: 'edit-gps-toast' });
     try {
       const res = await getUserCurrentLocation({ timeoutMs: 15000 });
       toast.dismiss('edit-gps-toast');
       if (res.coords) {
         if (res.coords.structuredAddress) {
-          const st = res.coords.structuredAddress;
-          setEditAddress(st.street || st.formattedAddress);
-          if (st.city) setEditCity(st.city);
-          if (st.pincode) setEditPincode(st.pincode);
+          const s = res.coords.structuredAddress;
+          if (s.road || s.houseNumber) {
+            setEditAddress([s.houseNumber, s.road, s.suburb].filter(Boolean).join(', '));
+          }
+          if (s.city) setEditCity(s.city);
+          if (s.postcode) setEditPincode(s.postcode);
         } else if (res.coords.address) {
           setEditAddress(res.coords.address);
         }
-        toast.success('Address populated from live GPS! 📍');
-      } else if (res.error) {
-        toast.error(res.error);
+        toast.success('Live GPS address populated!');
+      } else {
+        toast.error(res.error || 'GPS detection failed.');
       }
     } catch (e) {
       toast.dismiss('edit-gps-toast');
@@ -228,8 +244,9 @@ export default function ProfileModal({
             blocked: false,
             totalOrders: 0
           };
-          await setDoc(userDocRef, newProf);
-          setUserProfile(newProf);
+          const clean = cleanFirestoreObject(newProf);
+          await setDoc(userDocRef, clean);
+          setUserProfile(clean);
         } else {
           const existingData = snap.data() as UserProfile;
           if (existingData.blocked) {
@@ -307,19 +324,23 @@ export default function ProfileModal({
         id: user.uid,
         name: regFullName.trim(),
         email: emailLower,
-        phone: regMobile.trim(),
+        phone: regMobile.trim() || '',
         role: isBootstrapAdmin ? 'admin' : 'customer',
         address: regAddress.trim(),
         city: regCity.trim() || 'New Delhi',
-        pincode: regPincode.trim(),
-        location: regLocation || undefined,
+        pincode: regPincode.trim() || '',
         createdAt: new Date().toISOString(),
         blocked: false,
         totalOrders: 0
       };
 
-      await setDoc(doc(db, 'users', user.uid), customerProfile);
-      setUserProfile(customerProfile);
+      if (regLocation) {
+        customerProfile.location = regLocation;
+      }
+
+      const cleanProfile = cleanFirestoreObject(customerProfile);
+      await setDoc(doc(db, 'users', user.uid), cleanProfile);
+      setUserProfile(cleanProfile);
       onLogin?.(regFullName.trim());
       onClose();
 
@@ -335,7 +356,7 @@ export default function ProfileModal({
         (error.message && error.message.includes('email-already-in-use'));
 
       if (isEmailInUse) {
-        // Smart fallback: If account already exists with this email, attempt immediate sign-in with the provided password
+        // Smart fallback: If account already exists with this email, attempt sign-in with the provided password
         try {
           const userCred = await signInWithEmailAndPassword(auth, emailLower, regPassword);
           const user = userCred.user;
@@ -352,7 +373,6 @@ export default function ProfileModal({
               toast.error('This account is suspended. Please contact support.');
               return;
             }
-            // Update profile with newest details if provided
             const updates: Partial<UserProfile> = {};
             if (regFullName.trim() && !prof.name) updates.name = regFullName.trim();
             if (regAddress.trim() && !prof.address) updates.address = regAddress.trim();
@@ -361,8 +381,9 @@ export default function ProfileModal({
             if (isBootstrapAdmin && prof.role !== 'admin') updates.role = 'admin';
 
             if (Object.keys(updates).length > 0) {
-              await updateDoc(userDocRef, updates);
-              Object.assign(prof, updates);
+              const cleanUpdates = cleanFirestoreObject(updates);
+              await updateDoc(userDocRef, cleanUpdates);
+              Object.assign(prof, cleanUpdates);
             }
             userRole = prof.role || userRole;
             setUserProfile(prof);
@@ -371,18 +392,19 @@ export default function ProfileModal({
               id: user.uid,
               name: regFullName.trim() || user.displayName || 'Customer',
               email: emailLower,
-              phone: regMobile.trim(),
+              phone: regMobile.trim() || '',
               role: isBootstrapAdmin ? 'admin' : 'customer',
               address: regAddress.trim(),
               city: regCity.trim() || 'New Delhi',
-              pincode: regPincode.trim(),
-              location: regLocation || undefined,
+              pincode: regPincode.trim() || '',
               createdAt: new Date().toISOString(),
               blocked: false,
               totalOrders: 0
             };
-            await setDoc(userDocRef, customerProfile);
-            setUserProfile(customerProfile);
+            if (regLocation) customerProfile.location = regLocation;
+            const cleanProf = cleanFirestoreObject(customerProfile);
+            await setDoc(userDocRef, cleanProf);
+            setUserProfile(cleanProf);
           }
 
           const displayName = user.displayName || regFullName.trim() || 'Customer';
@@ -397,7 +419,6 @@ export default function ProfileModal({
           }
           return;
         } catch (loginErr: any) {
-          // If password was incorrect or different
           toast.error('This email is already registered. Switched to Sign In — please enter your password.', { duration: 5000 });
           setLoginIdentifier(emailLower);
           setActiveTab('customer-login');
@@ -443,18 +464,19 @@ export default function ProfileModal({
         }
         userRole = prof.role || userRole;
         setUserProfile(prof);
-      } else if (isBootstrapAdmin) {
-        const adminProf: UserProfile = {
+      } else {
+        const defaultProf: UserProfile = {
           id: user.uid,
-          name: user.displayName || 'Administrator',
-          email: user.email || ADMIN_BOOTSTRAP_EMAIL,
-          role: 'admin',
+          name: user.displayName || (user.email ? user.email.split('@')[0] : 'Customer'),
+          email: user.email || resolvedEmail,
+          role: isBootstrapAdmin ? 'admin' : 'customer',
           createdAt: new Date().toISOString(),
           blocked: false,
           totalOrders: 0
         };
-        await setDoc(userDocRef, adminProf);
-        setUserProfile(adminProf);
+        const cleanProf = cleanFirestoreObject(defaultProf);
+        await setDoc(userDocRef, cleanProf);
+        setUserProfile(cleanProf);
       }
       
       const displayName = user.displayName || (user.email ? user.email.split('@')[0] : 'Customer');
@@ -472,6 +494,70 @@ export default function ProfileModal({
       }
     } catch (error: any) {
       console.error('Customer Login error:', error);
+      toast.error(getAuthErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Admin Login
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminIdentifier.trim() || !adminPassword) {
+      toast.error('Please enter Admin Email and Password');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const email = await resolveEmailFromIdentifier(adminIdentifier);
+      const userCred = await signInWithEmailAndPassword(auth, email, adminPassword);
+      const user = userCred.user;
+
+      // Verify Admin Role from Firestore / bootstrap
+      const userDocRef = doc(db, 'users', user.uid);
+      const snap = await getDoc(userDocRef);
+      let isAuthorized = false;
+
+      if (snap.exists()) {
+        const prof = snap.data() as UserProfile;
+        if (isUserAdmin(user.email, prof)) {
+          isAuthorized = true;
+          if (prof.role !== 'admin') {
+            await updateDoc(userDocRef, { role: 'admin' });
+            prof.role = 'admin';
+          }
+        }
+        setUserProfile(prof);
+      } else if (isUserAdmin(user.email, null)) {
+        isAuthorized = true;
+        const adminProf: UserProfile = {
+          id: user.uid,
+          name: user.displayName || 'Administrator',
+          email: user.email || ADMIN_BOOTSTRAP_EMAIL,
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          blocked: false,
+          totalOrders: 0
+        };
+        await setDoc(userDocRef, cleanFirestoreObject(adminProf));
+        setUserProfile(adminProf);
+      }
+
+      if (!isAuthorized) {
+        toast.error('Access Denied: This account does not possess authorized Admin privileges.');
+        onLogin?.(user.displayName || 'Customer');
+        onClose();
+        onNavigate?.('home');
+        return;
+      }
+
+      toast.success('Admin Security Clearance Verified! 🛡️');
+      onLogin?.(user.displayName || 'Administrator');
+      onClose();
+      onNavigate?.('admin');
+    } catch (error: any) {
+      console.error('Admin Login error:', error);
       toast.error(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
@@ -499,16 +585,16 @@ export default function ProfileModal({
 
       if (snap.exists()) {
         const prof = snap.data() as UserProfile;
-        if (prof.role === 'rider' || prof.role === 'admin' || user.email === ADMIN_BOOTSTRAP_EMAIL) {
+        if (prof.role === 'rider' || isUserAdmin(user.email, prof)) {
           isRiderAuthorized = true;
         }
         setUserProfile(prof);
-      } else if (user.email === ADMIN_BOOTSTRAP_EMAIL) {
+      } else if (isUserAdmin(user.email, null)) {
         isRiderAuthorized = true;
       }
 
       if (!isRiderAuthorized) {
-        toast('Logged in, but this account is not registered as a Delivery Partner. Register with Admin for rider access.', { icon: 'ℹ️' });
+        toast('Logged in as customer. Contact Admin to register your vehicle for Fleet Delivery access.', { icon: 'ℹ️' });
       } else {
         toast.success(`Welcome Rider, ${user.displayName || 'Partner'}! 🛵`);
       }
@@ -550,12 +636,13 @@ export default function ProfileModal({
     if (!currentUser) return;
     try {
       setLoading(true);
-      await updateDoc(doc(db, 'users', currentUser.uid), {
+      const updates = cleanFirestoreObject({
         address: editAddress.trim(),
         city: editCity.trim(),
         pincode: editPincode.trim(),
         phone: editPhone.trim()
       });
+      await updateDoc(doc(db, 'users', currentUser.uid), updates);
       setUserProfile((prev) => prev ? { 
         ...prev, 
         address: editAddress.trim(), 
@@ -734,7 +821,7 @@ export default function ProfileModal({
                   </div>
                   <div>
                     <h4 className="font-bold text-sm">My Orders</h4>
-                    <p className="text-xs text-gray-500">View orders & invoices</p>
+                    <p className="text-xs text-gray-500">View orders & tracking</p>
                   </div>
                 </button>
 
@@ -805,11 +892,11 @@ export default function ProfileModal({
             </div>
           ) : (
             /* ========================================================= */
-            /* UN-AUTHENTICATED: LOGIN / REGISTER / RIDER VIEWS          */
+            /* UN-AUTHENTICATED: LOGIN / REGISTER / ADMIN / RIDER VIEWS */
             /* ========================================================= */
             <>
-              {/* Dedicated Partner / Rider Login Back-Button */}
-              {activeTab === 'rider-login' ? (
+              {/* Back button for special tabs */}
+              {activeTab === 'rider-login' || activeTab === 'admin-login' ? (
                 <div className="mb-6 flex items-center justify-between">
                   <button
                     type="button"
@@ -819,12 +906,16 @@ export default function ProfileModal({
                     <ArrowLeft className="w-4 h-4" />
                     <span>Back to Customer Sign In</span>
                   </button>
-                  <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-mono">
-                    FLEET PORTAL
+                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full font-mono border ${
+                    activeTab === 'admin-login' 
+                      ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' 
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                  }`}>
+                    {activeTab === 'admin-login' ? 'ADMIN SECURITY GATE' : 'FLEET PORTAL'}
                   </span>
                 </div>
               ) : activeTab !== 'forgot-password' ? (
-                /* Sleek 2-segment Customer Switcher */
+                /* Customer Switcher (Sign In vs Create Account) */
                 <div className="grid grid-cols-2 gap-2 bg-gray-100 dark:bg-[#0a0a0a] p-1.5 rounded-2xl mb-6 border border-black/5 dark:border-white/5">
                   <button
                     type="button"
@@ -974,6 +1065,27 @@ export default function ProfileModal({
                       className="text-[#E23744] font-black hover:underline cursor-pointer"
                     >
                       Register to Order here
+                    </button>
+                  </div>
+
+                  {/* Subtle portals footer */}
+                  <div className="mt-6 pt-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-center gap-4 text-[11px] text-gray-400">
+                    <button 
+                      type="button" 
+                      onClick={() => setActiveTab('rider-login')} 
+                      className="hover:text-amber-500 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <Bike className="w-3.5 h-3.5" />
+                      <span>Rider Portal</span>
+                    </button>
+                    <span>•</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setActiveTab('admin-login')} 
+                      className="hover:text-blue-500 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Admin Access</span>
                     </button>
                   </div>
                 </div>
@@ -1190,7 +1302,95 @@ export default function ProfileModal({
               )}
 
               {/* ------------------------------------------------------------- */}
-              {/* TAB 2: RIDER (DELIVERY BOY) LOGIN                             */}
+              {/* TAB 3: ADMIN SECURITY LOGIN                                   */}
+              {/* ------------------------------------------------------------- */}
+              {activeTab === 'admin-login' && (
+                <div>
+                  <div className="mb-5">
+                    <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-black text-xs uppercase tracking-wider mb-1">
+                      <ShieldCheck className="w-4 h-4" />
+                      Authorized Personnel Only
+                    </div>
+                    <h2 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      Admin Security Login 🛡️
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Access live order dispatches, restaurant menu management, rider allocations, and store settings.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleAdminLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        Admin Email Address
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="email" 
+                          required
+                          value={adminIdentifier}
+                          onChange={(e) => setAdminIdentifier(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
+                          placeholder="admin@m-bites.com" 
+                        />
+                        <Mail className="w-4 h-4 text-blue-500 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300">Admin Password</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold cursor-pointer"
+                        >
+                          {showPassword ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input 
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          value={adminPassword}
+                          onChange={(e) => setAdminPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/20 bg-blue-50/30 dark:bg-blue-950/20 text-gray-900 dark:text-white text-sm focus:border-blue-500 outline-none" 
+                          placeholder="••••••••" 
+                        />
+                        <Lock className="w-4 h-4 text-blue-500 absolute left-3.5 top-3.5" />
+                        <button 
+                          type="button" 
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit" 
+                      disabled={loading}
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-base py-3.5 rounded-xl shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {loading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Verifying Security Clearance...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-5 h-5" />
+                          <span>Authenticate & Open Admin Dashboard</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 4: RIDER (DELIVERY BOY) LOGIN                             */}
               {/* ------------------------------------------------------------- */}
               {activeTab === 'rider-login' && (
                 <div>

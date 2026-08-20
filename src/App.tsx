@@ -122,14 +122,14 @@ export default function App() {
   }, [currentUser]);
 
   const isAdmin = isUserAdmin(userEmail, currentUserProfile);
-  const isRider = isUserRider(currentUserProfile) || isAdmin;
+  const isRider = isUserRider(currentUserProfile, userEmail);
 
   // Fetch / Sync Orders from Firestore & Trigger Push/Toast notifications on status change
   useEffect(() => {
     if (!currentUser) return;
     
     let q;
-    if (currentUser.email === 'murlimanohar7041@gmail.com') {
+    if (isUserAdmin(currentUser.email, currentUserProfile)) {
       // Admin sees all orders
       q = query(collection(db, 'orders'));
     } else {

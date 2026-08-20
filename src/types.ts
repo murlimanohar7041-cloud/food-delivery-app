@@ -23,11 +23,26 @@ export interface Address {
   pincode?: string;
 }
 
+export interface StructuredAddress {
+  formattedAddress?: string;
+  street?: string;
+  road?: string;
+  houseNumber?: string;
+  suburb?: string;
+  area?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  postcode?: string;
+  country?: string;
+}
+
 export interface LocationCoords {
   lat: number;
   lng: number;
   address?: string;
   accuracy?: number;
+  structuredAddress?: StructuredAddress;
 }
 
 export interface RestaurantLocation extends LocationCoords {
