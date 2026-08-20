@@ -3,38 +3,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { auth, db } from './firebase';
 import { collection, doc, setDoc, updateDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from './lib/firestore-errors';
 import { AnimatePresence } from 'motion/react';
-import { ShieldCheck, Bike, ArrowLeft, Lock } from 'lucide-react';
+import { ShieldCheck, Bike, ArrowLeft, Lock, RefreshCw } from 'lucide-react';
 import Navbar from './components/Navbar';
 import Hero from './components/Hero';
 import Banners from './components/Banners';
 import Categories from './components/Categories';
 import ProductGrid from './components/ProductGrid';
 import BottomNav from './components/BottomNav';
-import MenuPage from './components/MenuPage';
-import CartPanel from './components/CartPanel';
-import CheckoutPage from './components/CheckoutPage';
-import SuccessScreen from './components/SuccessScreen';
-import OffersPage from './components/OffersPage';
 import SkeletonGrid from './components/SkeletonGrid';
-
-import OrdersPage from './components/OrdersPage';
-import AdminDashboard from './components/AdminDashboard';
-import DeliveryPartnerDashboard from './components/DeliveryPartnerDashboard';
-import SearchPage from './components/SearchPage';
-import WishlistPage from './components/WishlistPage';
-import ProfileModal from './components/ProfileModal';
 import MobileMenu from './components/MobileMenu';
-import ProductModal from './components/ProductModal';
 import Footer from './components/Footer';
-import PWAInstallPrompt from './components/PWAInstallPrompt';
 import OfflineBanner from './components/OfflineBanner';
+
+// Lazy-loaded components for optimal initial bundle & performance
+const MenuPage = lazy(() => import('./components/MenuPage'));
+const CartPanel = lazy(() => import('./components/CartPanel'));
+const CheckoutPage = lazy(() => import('./components/CheckoutPage'));
+const SuccessScreen = lazy(() => import('./components/SuccessScreen'));
+const OffersPage = lazy(() => import('./components/OffersPage'));
+const OrdersPage = lazy(() => import('./components/OrdersPage'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+const DeliveryPartnerDashboard = lazy(() => import('./components/DeliveryPartnerDashboard'));
+const SearchPage = lazy(() => import('./components/SearchPage'));
+const WishlistPage = lazy(() => import('./components/WishlistPage'));
+const ProfileModal = lazy(() => import('./components/ProfileModal'));
+const ProductModal = lazy(() => import('./components/ProductModal'));
+const PWAInstallPrompt = lazy(() => import('./components/PWAInstallPrompt'));
 import { Order, CartItem, OrderStatus, RestaurantLocation, UserProfile } from './types';
 import { DEFAULT_CUSTOMER_LOCATION, DEFAULT_RESTAURANT_LOCATION } from './utils/geoUtils';
 import { registerServiceWorker, sendOrderStatusNotification } from './utils/pwaUtils';
@@ -387,17 +388,24 @@ export default function App() {
     }
 
     return (
-      <AdminDashboard 
-        orders={orders}
-        onUpdateOrderStatus={async (id: string, status: string) => {
-          try {
-            await updateDoc(doc(db, 'orders', id), { status });
-          } catch (error) {
-            handleFirestoreError(error, OperationType.UPDATE, `orders/${id}`);
-          }
-        }}
-        onBack={() => setView('home')}
-      />
+      <Suspense fallback={
+        <div className="min-h-screen bg-[#0f1117] flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="w-8 h-8 text-[#E23744] animate-spin" />
+          <p className="text-xs font-bold text-gray-400">Loading Admin Command Center...</p>
+        </div>
+      }>
+        <AdminDashboard 
+          orders={orders}
+          onUpdateOrderStatus={async (id: string, status: string) => {
+            try {
+              await updateDoc(doc(db, 'orders', id), { status });
+            } catch (error) {
+              handleFirestoreError(error, OperationType.UPDATE, `orders/${id}`);
+            }
+          }}
+          onBack={() => setView('home')}
+        />
+      </Suspense>
     );
   }
 
@@ -437,32 +445,43 @@ export default function App() {
     }
 
     return (
-      <DeliveryPartnerDashboard
-        onBack={() => setView('home')}
-        partnerEmail={userEmail || ''}
-      />
+      <Suspense fallback={
+        <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="w-8 h-8 text-amber-500 animate-spin" />
+          <p className="text-xs font-bold text-gray-400">Loading Delivery Partner Portal...</p>
+        </div>
+      }>
+        <DeliveryPartnerDashboard
+          onBack={() => setView('home')}
+          partnerEmail={userEmail || ''}
+        />
+      </Suspense>
     );
   }
 
   if (view === 'success') {
     return (
-      <SuccessScreen 
-        order={currentOrder}
-        onViewOrders={() => setView('orders')}
-        onBackToHome={handleBackToHome} 
-      />
+      <Suspense fallback={<SkeletonGrid />}>
+        <SuccessScreen 
+          order={currentOrder}
+          onViewOrders={() => setView('orders')}
+          onBackToHome={handleBackToHome} 
+        />
+      </Suspense>
     );
   }
 
   if (view === 'checkout') {
     return (
-      <CheckoutPage 
-        cartItems={cartItems} 
-        currentUser={currentUser}
-        onBack={() => setView(selectedRestaurant ? 'menu' : 'home')} 
-        onRequireAuth={() => setIsProfileOpen(true)}
-        onPlaceOrder={handlePlaceOrder} 
-      />
+      <Suspense fallback={<SkeletonGrid />}>
+        <CheckoutPage 
+          cartItems={cartItems} 
+          currentUser={currentUser}
+          onBack={() => setView(selectedRestaurant ? 'menu' : 'home')} 
+          onRequireAuth={() => setIsProfileOpen(true)}
+          onPlaceOrder={handlePlaceOrder} 
+        />
+      </Suspense>
     );
   }
 
@@ -499,60 +518,70 @@ export default function App() {
         ) : (
           <>
             {view === 'menu' && selectedRestaurant && (
-              <MenuPage 
-                restaurant={selectedRestaurant} 
-                onBack={() => handleNavChange('home', null)} 
-                cartItems={cartItems}
-                wishlistIds={wishlist}
-                onAddToCart={handleAddToCart}
-                onBuyNow={handleBuyNow}
-                onProductClick={setSelectedProduct}
-                onUpdateQuantity={handleUpdateQuantity}
-                onToggleWishlist={handleToggleWishlist}
-                onSearch={() => handleNavChange('search')}
-              />
+              <Suspense fallback={<SkeletonGrid />}>
+                <MenuPage 
+                  restaurant={selectedRestaurant} 
+                  onBack={() => handleNavChange('home', null)} 
+                  cartItems={cartItems}
+                  wishlistIds={wishlist}
+                  onAddToCart={handleAddToCart}
+                  onBuyNow={handleBuyNow}
+                  onProductClick={setSelectedProduct}
+                  onUpdateQuantity={handleUpdateQuantity}
+                  onToggleWishlist={handleToggleWishlist}
+                  onSearch={() => handleNavChange('search')}
+                />
+              </Suspense>
             )}
             
             {view === 'offers' && (
-              <OffersPage 
-                onSelectRestaurant={(restaurant) => handleNavChange('menu', restaurant)}
-                onBack={() => handleNavChange('home')}
-              />
+              <Suspense fallback={<SkeletonGrid />}>
+                <OffersPage 
+                  onSelectRestaurant={(restaurant) => handleNavChange('menu', restaurant)}
+                  onBack={() => handleNavChange('home')}
+                />
+              </Suspense>
             )}
             
             {view === 'orders' && (
-              <OrdersPage 
-                orders={orders}
-                onBack={() => handleNavChange('home')}
-                isAdmin={isAdmin}
-                onReorder={(items) => {
-                  items.forEach(i => handleAddToCart(i));
-                  setIsCartOpen(true);
-                }}
-              />
+              <Suspense fallback={<SkeletonGrid />}>
+                <OrdersPage 
+                  orders={orders}
+                  onBack={() => handleNavChange('home')}
+                  isAdmin={isAdmin}
+                  onReorder={(items) => {
+                    items.forEach(i => handleAddToCart(i));
+                    setIsCartOpen(true);
+                  }}
+                />
+              </Suspense>
             )}
 
             {view === 'wishlist' && (
-              <WishlistPage 
-                wishlistIds={wishlist}
-                onRemoveFromWishlist={handleToggleWishlist}
-                onAddToCart={handleAddToCart}
-                onBuyNow={handleBuyNow}
-                onProductClick={setSelectedProduct}
-                onBack={() => handleNavChange('home')}
-              />
+              <Suspense fallback={<SkeletonGrid />}>
+                <WishlistPage 
+                  wishlistIds={wishlist}
+                  onRemoveFromWishlist={handleToggleWishlist}
+                  onAddToCart={handleAddToCart}
+                  onBuyNow={handleBuyNow}
+                  onProductClick={setSelectedProduct}
+                  onBack={() => handleNavChange('home')}
+                />
+              </Suspense>
             )}
 
             {view === 'search' && (
-              <SearchPage 
-                initialQuery={searchQuery}
-                onBack={() => handleNavChange('home')}
-                onAddToCart={handleAddToCart}
-                onBuyNow={handleBuyNow}
-                onProductClick={setSelectedProduct}
-                wishlistIds={wishlist}
-                onToggleWishlist={handleToggleWishlist}
-              />
+              <Suspense fallback={<SkeletonGrid />}>
+                <SearchPage 
+                  initialQuery={searchQuery}
+                  onBack={() => handleNavChange('home')}
+                  onAddToCart={handleAddToCart}
+                  onBuyNow={handleBuyNow}
+                  onProductClick={setSelectedProduct}
+                  wishlistIds={wishlist}
+                  onToggleWishlist={handleToggleWishlist}
+                />
+              </Suspense>
             )}
 
             {view === 'home' && (
@@ -586,7 +615,9 @@ export default function App() {
       <OfflineBanner />
 
       {/* PWA Floating Install Prompt */}
-      <PWAInstallPrompt />
+      <Suspense fallback={null}>
+        <PWAInstallPrompt />
+      </Suspense>
 
       <BottomNav 
         cartCount={cartCount} 
@@ -599,21 +630,29 @@ export default function App() {
         activeView={view}
       />
       
-      <CartPanel 
-        isOpen={isCartOpen} 
-        onClose={() => setIsCartOpen(false)} 
-        cartItems={cartItems}
-        onUpdateQuantity={handleUpdateQuantity}
-        onCheckout={handleCheckout}
-      />
+      {isCartOpen && (
+        <Suspense fallback={null}>
+          <CartPanel 
+            isOpen={isCartOpen} 
+            onClose={() => setIsCartOpen(false)} 
+            cartItems={cartItems}
+            onUpdateQuantity={handleUpdateQuantity}
+            onCheckout={handleCheckout}
+          />
+        </Suspense>
+      )}
       
-      <ProfileModal 
-        isOpen={isProfileOpen} 
-        onClose={() => setIsProfileOpen(false)} 
-        initialMode={profileInitialMode}
-        onLogin={handleLogin}
-        onNavigate={(v) => handleNavChange(v as ViewState)}
-      />
+      {isProfileOpen && (
+        <Suspense fallback={null}>
+          <ProfileModal 
+            isOpen={isProfileOpen} 
+            onClose={() => setIsProfileOpen(false)} 
+            initialMode={profileInitialMode}
+            onLogin={handleLogin}
+            onNavigate={(v) => handleNavChange(v as ViewState)}
+          />
+        </Suspense>
+      )}
       
       <MobileMenu 
         isOpen={isMobileMenuOpen} 
@@ -627,12 +666,14 @@ export default function App() {
 
       <AnimatePresence>
         {selectedProduct && (
-          <ProductModal
-            product={selectedProduct}
-            onClose={() => setSelectedProduct(null)}
-            onAddToCart={handleAddToCart}
-            onBuyNow={handleBuyNow}
-          />
+          <Suspense fallback={null}>
+            <ProductModal
+              product={selectedProduct}
+              onClose={() => setSelectedProduct(null)}
+              onAddToCart={handleAddToCart}
+              onBuyNow={handleBuyNow}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
     </div>

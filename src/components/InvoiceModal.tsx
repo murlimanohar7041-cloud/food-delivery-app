@@ -2,8 +2,6 @@ import { FileText, Download, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState } from 'react';
 import { Order } from '../types';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import toast from 'react-hot-toast';
 
 interface InvoiceModalProps {
@@ -21,9 +19,15 @@ export default function InvoiceModal({ show, onClose, order }: InvoiceModalProps
     if (!element) return;
     
     setIsDownloading(true);
-    const toastId = toast.loading('Generating Official Tax Invoice...');
+    const toastId = toast.loading('Loading PDF engine & generating Tax Invoice...');
     
     try {
+      // Dynamic import for lightweight initial bundle
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf')
+      ]);
+
       // 1. Handle Dark Mode for clean print
       const wasDark = document.documentElement.classList.contains('dark');
       if (wasDark) {
@@ -40,11 +44,11 @@ export default function InvoiceModal({ show, onClose, order }: InvoiceModalProps
       element.style.width = '800px'; 
       
       // 3. Delay to ensure font and styles are ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 800));
 
       // 4. Capture Canvas
       const canvas = await html2canvas(element, {
-        scale: 3,
+        scale: 2.5,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,

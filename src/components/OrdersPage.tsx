@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import {
   ArrowLeft,
   Search,
@@ -19,12 +19,13 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import InvoiceModal from './InvoiceModal';
-import LiveTrackingMap from './LiveTrackingMap';
 import { Order, OrderStatus } from '../types';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { toast } from 'react-hot-toast';
+
+const InvoiceModal = lazy(() => import('./InvoiceModal'));
+const LiveTrackingMap = lazy(() => import('./LiveTrackingMap'));
 
 interface OrdersPageProps {
   orders: Order[];
@@ -441,12 +442,19 @@ function OrderDetailView({
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Main View: Live GPS Map Component */}
         {activeTab === 'map' ? (
-          <LiveTrackingMap
-            order={order}
-            isAdmin={isAdmin}
-            onUpdateStatus={handleUpdateStatus}
-            onClose={onBack}
-          />
+          <Suspense fallback={
+            <div className="w-full h-96 bg-white dark:bg-[#141414] rounded-2xl flex flex-col items-center justify-center border border-gray-200 dark:border-white/10 gap-3">
+              <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+              <p className="text-sm font-bold text-gray-500">Loading Live GPS Tracking Map...</p>
+            </div>
+          }>
+            <LiveTrackingMap
+              order={order}
+              isAdmin={isAdmin}
+              onUpdateStatus={handleUpdateStatus}
+              onClose={onBack}
+            />
+          </Suspense>
         ) : null}
 
         {/* Detailed Address & Items breakdown */}
@@ -568,11 +576,15 @@ function OrderDetailView({
         </div>
       </div>
 
-      <InvoiceModal
-        show={showInvoice}
-        onClose={() => setShowInvoice(false)}
-        order={order}
-      />
+      {showInvoice && (
+        <Suspense fallback={null}>
+          <InvoiceModal
+            show={showInvoice}
+            onClose={() => setShowInvoice(false)}
+            order={order}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

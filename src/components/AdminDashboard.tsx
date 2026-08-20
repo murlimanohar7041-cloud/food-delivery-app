@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { 
   ArrowLeft, 
   RefreshCw, 
@@ -29,14 +29,15 @@ import {
   Check
 } from 'lucide-react';
 import { Order, OrderStatus, UserProfile, DeliveryPartner } from '../types';
-import LiveTrackingMap from './LiveTrackingMap';
-import KitchenLocationManager from './KitchenLocationManager';
-import OrderChatModal from './OrderChatModal';
-import CallModal from './CallModal';
 import { products as initialProducts, Product } from '../products';
 import { db, auth } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, setDoc, addDoc, query, getDocs } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
+
+const LiveTrackingMap = lazy(() => import('./LiveTrackingMap'));
+const KitchenLocationManager = lazy(() => import('./KitchenLocationManager'));
+const OrderChatModal = lazy(() => import('./OrderChatModal'));
+const CallModal = lazy(() => import('./CallModal'));
 
 interface AdminDashboardProps {
   onBack: () => void;
@@ -900,7 +901,14 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
 
         {/* TAB 4: KITCHEN & STORE GPS SETTINGS */}
         {activeTab === 'kitchen' && (
-          <KitchenLocationManager />
+          <Suspense fallback={
+            <div className="w-full h-80 bg-[#15171e] rounded-2xl flex flex-col items-center justify-center border border-white/10 gap-3">
+              <RefreshCw className="w-8 h-8 text-[#E23744] animate-spin" />
+              <p className="text-xs font-bold text-gray-400">Loading Kitchen GPS Settings...</p>
+            </div>
+          }>
+            <KitchenLocationManager />
+          </Suspense>
         )}
 
       </div>
@@ -1165,33 +1173,39 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
 
       {/* Real-time Order Chat Modal */}
       {chatOrder && (
-        <OrderChatModal
-          order={chatOrder}
-          currentUserRole="restaurant"
-          currentUserId={auth.currentUser?.uid || 'admin-uid'}
-          currentUserName={auth.currentUser?.displayName || 'M-Bites Kitchen'}
-          onClose={() => setChatOrder(null)}
-          onInitiateCall={(role, phone, name) => {
-            setCallModalData({
-              isOpen: true,
-              targetRole: role,
-              targetName: name,
-              targetPhone: phone,
-              orderId: chatOrder.id
-            });
-          }}
-        />
+        <Suspense fallback={null}>
+          <OrderChatModal
+            order={chatOrder}
+            currentUserRole="restaurant"
+            currentUserId={auth.currentUser?.uid || 'admin-uid'}
+            currentUserName={auth.currentUser?.displayName || 'M-Bites Kitchen'}
+            onClose={() => setChatOrder(null)}
+            onInitiateCall={(role, phone, name) => {
+              setCallModalData({
+                isOpen: true,
+                targetRole: role,
+                targetName: name,
+                targetPhone: phone,
+                orderId: chatOrder.id
+              });
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Secure Call Modal */}
-      <CallModal
-        isOpen={callModalData.isOpen}
-        onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
-        targetRole={callModalData.targetRole}
-        targetName={callModalData.targetName}
-        targetPhone={callModalData.targetPhone}
-        orderId={callModalData.orderId}
-      />
+      {callModalData.isOpen && (
+        <Suspense fallback={null}>
+          <CallModal
+            isOpen={callModalData.isOpen}
+            onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
+            targetRole={callModalData.targetRole}
+            targetName={callModalData.targetName}
+            targetPhone={callModalData.targetPhone}
+            orderId={callModalData.orderId}
+          />
+        </Suspense>
+      )}
 
       {/* Real-time Order GPS Live Tracking Modal for Admin */}
       {trackingOrder && (
@@ -1220,16 +1234,23 @@ export default function AdminDashboard({ onBack, orders = [], onUpdateOrderStatu
               </button>
             </div>
 
-            <LiveTrackingMap
-              order={trackingOrder}
-              isAdmin={true}
-              onUpdateStatus={(status) => {
-                if (onUpdateOrderStatus) {
-                  onUpdateOrderStatus(trackingOrder.id, status);
-                }
-              }}
-              onClose={() => setTrackingOrder(null)}
-            />
+            <Suspense fallback={
+              <div className="w-full h-96 bg-[#15171e] rounded-2xl flex flex-col items-center justify-center border border-white/10 gap-3">
+                <RefreshCw className="w-8 h-8 text-[#E23744] animate-spin" />
+                <p className="text-xs font-bold text-gray-400">Loading GPS Map View...</p>
+              </div>
+            }>
+              <LiveTrackingMap
+                order={trackingOrder}
+                isAdmin={true}
+                onUpdateStatus={(status) => {
+                  if (onUpdateOrderStatus) {
+                    onUpdateOrderStatus(trackingOrder.id, status);
+                  }
+                }}
+                onClose={() => setTrackingOrder(null)}
+              />
+            </Suspense>
           </div>
         </div>
       )}

@@ -17,7 +17,9 @@ import {
   Crosshair,
   Gauge,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Store,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderStatus, DeliveryLocation, DeliveryPartner, LiveLocation } from '../types';
@@ -27,7 +29,8 @@ import {
   calculateETA,
   fetchRealRoadRoute,
   getUserCurrentLocation,
-  DEFAULT_CUSTOMER_LOCATION
+  DEFAULT_CUSTOMER_LOCATION,
+  DEFAULT_RESTAURANT_LOCATION
 } from '../utils/geoUtils';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -65,10 +68,12 @@ export default function LiveTrackingMap({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
 
-  // Markers & Layers refs (ONLY Customer and Delivery Boy markers on map)
+  // Markers & Layers refs (Kitchen, Customer, and Delivery Boy markers on map)
+  const kitchenMarkerRef = useRef<L.Marker | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const riderMarkerRef = useRef<L.Marker | null>(null);
   const routePolylineRef = useRef<L.Polyline | null>(null);
+  const kitchenToRiderPolylineRef = useRef<L.Polyline | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
 
   // Live map state
@@ -134,6 +139,20 @@ export default function LiveTrackingMap({
     };
   }, [initialOrder?.id]);
 
+  // Kitchen / Store GPS coordinates
+  const kitchenPos = useMemo(() => {
+    if (liveOrder.restaurantLocation?.lat && liveOrder.restaurantLocation?.lng) {
+      return {
+        lat: liveOrder.restaurantLocation.lat,
+        lng: liveOrder.restaurantLocation.lng,
+        name: liveOrder.restaurantLocation.name || 'M-Bites Gourmet Kitchen',
+        address: liveOrder.restaurantLocation.address || 'Central Store, Connaught Place, New Delhi',
+        phone: liveOrder.restaurantLocation.phone || '+91 98765 00000'
+      };
+    }
+    return DEFAULT_RESTAURANT_LOCATION;
+  }, [liveOrder.restaurantLocation]);
+
   // Customer GPS coordinates
   const customerPos = useMemo(() => {
     if (liveOrder.customerLocation?.lat && liveOrder.customerLocation?.lng) {
@@ -164,15 +183,15 @@ export default function LiveTrackingMap({
     if (liveOrder.deliveryLocation?.lat && liveOrder.deliveryLocation?.lng) {
       return liveOrder.deliveryLocation;
     }
-    // Fallback: If not started yet, place rider near customer point with bearing toward customer
+    // Fallback: If not started yet, place rider near kitchen or customer
     return {
-      lat: customerPos.lat + 0.008,
-      lng: customerPos.lng + 0.008,
-      heading: calculateBearing(customerPos.lat + 0.008, customerPos.lng + 0.008, customerPos.lat, customerPos.lng) || 0,
+      lat: kitchenPos.lat + 0.003,
+      lng: kitchenPos.lng + 0.003,
+      heading: calculateBearing(kitchenPos.lat, kitchenPos.lng, customerPos.lat, customerPos.lng) || 0,
       speed: 0,
       updatedAt: liveOrder.date || new Date().toISOString()
     };
-  }, [liveLocationData, liveOrder.deliveryLocation, customerPos, liveOrder.date]);
+  }, [liveLocationData, liveOrder.deliveryLocation, kitchenPos, customerPos, liveOrder.date]);
 
   // Delivery partner details
   const deliveryPartner: DeliveryPartner = useMemo(() => {
@@ -243,29 +262,50 @@ export default function LiveTrackingMap({
     return idx === -1 ? 0 : idx;
   }, [liveOrder.status]);
 
-  // Custom high-contrast SVG leaflet icons (ONLY Customer & Rider)
+  // Custom high-contrast SVG leaflet icons for 1. Kitchen, 2. Delivery Boy, 3. Customer
   const createCustomIcons = useCallback(() => {
-    // 1. Customer Marker Icon (📍 Customer actual GPS location)
+    // 1. Kitchen / Store Marker Icon
+    const kitchenIcon = L.divIcon({
+      className: 'custom-kitchen-marker',
+      html: `
+        <div class="relative flex items-center justify-center">
+          <div class="absolute w-11 h-11 bg-red-500/25 rounded-full animate-ping"></div>
+          <div class="w-10 h-10 bg-gradient-to-tr from-[#E23744] to-orange-500 border-2 border-white rounded-full shadow-2xl flex items-center justify-center text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+            </svg>
+          </div>
+          <span class="absolute -bottom-5 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow whitespace-nowrap">
+            🏠 Store (Kitchen)
+          </span>
+        </div>
+      `,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+
+    // 2. Customer Marker Icon (📍 Customer actual GPS location)
     const userIcon = L.divIcon({
       className: 'custom-user-marker',
       html: `
         <div class="relative flex items-center justify-center">
-          <div class="absolute w-10 h-10 bg-blue-500/30 rounded-full animate-ping"></div>
-          <div class="w-9 h-9 bg-blue-600 border-2 border-white rounded-full shadow-xl flex items-center justify-center text-white">
+          <div class="absolute w-11 h-11 bg-blue-500/30 rounded-full animate-ping"></div>
+          <div class="w-10 h-10 bg-blue-600 border-2 border-white rounded-full shadow-2xl flex items-center justify-center text-white">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
             </svg>
           </div>
           <span class="absolute -bottom-5 bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow whitespace-nowrap">
-            📍 You (Customer)
+            📍 Customer (Delivery)
           </span>
         </div>
       `,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
     });
 
-    // 2. Real Delivery Partner GPS Marker Icon (🛵 Delivery Boy actual GPS location)
+    // 3. Real Delivery Partner GPS Marker Icon (🛵 Delivery Boy actual live GPS location)
     const headingDeg = currentRiderPos.heading || 0;
     const riderIcon = L.divIcon({
       className: 'custom-rider-marker',
@@ -289,7 +329,7 @@ export default function LiveTrackingMap({
       iconAnchor: [22, 22],
     });
 
-    return { userIcon, riderIcon };
+    return { kitchenIcon, userIcon, riderIcon };
   }, [currentRiderPos.heading, deliveryPartner.name]);
 
   const getTileUrl = (theme: 'light' | 'dark' | 'satellite') => {
@@ -304,7 +344,7 @@ export default function LiveTrackingMap({
     }
   };
 
-  // Initialize Map (Contains ONLY Customer & Rider markers)
+  // Initialize Map with all 3 Pins: 1. Kitchen, 2. Delivery Boy, 3. Customer
   useEffect(() => {
     if (!mapContainerRef.current) return;
     if (mapInstanceRef.current) return;
@@ -325,21 +365,27 @@ export default function LiveTrackingMap({
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    const { userIcon, riderIcon } = createCustomIcons();
+    const { kitchenIcon, userIcon, riderIcon } = createCustomIcons();
 
-    // 1. Add Customer Marker (ONLY Customer)
+    // 1. Add Kitchen Marker
+    const kMarker = L.marker([kitchenPos.lat, kitchenPos.lng], { icon: kitchenIcon })
+      .addTo(map)
+      .bindPopup(`<b>🏠 ${kitchenPos.name}</b><br/>${kitchenPos.address}<br/>Phone: ${kitchenPos.phone}`);
+    kitchenMarkerRef.current = kMarker;
+
+    // 2. Add Customer Marker
     const uMarker = L.marker([customerPos.lat, customerPos.lng], { icon: userIcon })
       .addTo(map)
-      .bindPopup(`<b>📍 Customer Delivery Location</b><br/>${customerPos.address}`);
+      .bindPopup(`<b>📍 Customer Delivery Destination</b><br/>${customerPos.address}`);
     userMarkerRef.current = uMarker;
 
-    // 2. Add Live Delivery Boy Marker (ONLY Rider)
+    // 3. Add Live Delivery Boy Marker
     const riderMarker = L.marker([currentRiderPos.lat, currentRiderPos.lng], { icon: riderIcon })
       .addTo(map)
-      .bindPopup(`<b>🛵 ${deliveryPartner.name}</b><br/>${deliveryPartner.vehicleNumber} (${deliveryPartner.vehicleType})<br/>Speed: ${currentRiderPos.speed || 0} km/h`);
+      .bindPopup(`<b>🛵 ${deliveryPartner.name} (Live Rider)</b><br/>${deliveryPartner.vehicleNumber} (${deliveryPartner.vehicleType})<br/>Speed: ${currentRiderPos.speed || 0} km/h`);
     riderMarkerRef.current = riderMarker;
 
-    // 3. Add Road Polyline between Rider and Customer
+    // 4. Add Road Polyline between Rider and Customer
     const initialCoords = roadRouteCoords.length > 0 
       ? roadRouteCoords 
       : [[currentRiderPos.lat, currentRiderPos.lng], [customerPos.lat, customerPos.lng]] as [number, number][];
@@ -353,8 +399,8 @@ export default function LiveTrackingMap({
     }).addTo(map);
     routePolylineRef.current = routeLine;
 
-    // Fit map bounds strictly to Customer & Rider markers
-    const group = L.featureGroup([uMarker, riderMarker]);
+    // Fit map bounds to encompass Kitchen, Rider, and Customer
+    const group = L.featureGroup([kMarker, uMarker, riderMarker]);
     map.fitBounds(group.getBounds().pad(0.25));
 
     mapInstanceRef.current = map;
@@ -371,11 +417,15 @@ export default function LiveTrackingMap({
     tileLayerRef.current.setUrl(getTileUrl(mapTheme));
   }, [mapTheme]);
 
-  // Update Markers and Polyline on live GPS updates
+  // Update Markers and Polylines on live GPS updates
   useEffect(() => {
     if (!mapInstanceRef.current) return;
-    const { userIcon, riderIcon } = createCustomIcons();
+    const { kitchenIcon, userIcon, riderIcon } = createCustomIcons();
 
+    if (kitchenMarkerRef.current) {
+      kitchenMarkerRef.current.setLatLng([kitchenPos.lat, kitchenPos.lng]);
+      kitchenMarkerRef.current.setIcon(kitchenIcon);
+    }
     if (userMarkerRef.current) {
       userMarkerRef.current.setLatLng([customerPos.lat, customerPos.lng]);
       userMarkerRef.current.setIcon(userIcon);
@@ -395,14 +445,15 @@ export default function LiveTrackingMap({
         duration: 0.5
       });
     }
-  }, [customerPos, currentRiderPos, roadRouteCoords, createCustomIcons, autoFollowRider, liveOrder.status]);
+  }, [kitchenPos, customerPos, currentRiderPos, roadRouteCoords, createCustomIcons, autoFollowRider, liveOrder.status]);
 
-  // Recenter controls (Customer & Rider only)
-  const handleRecenter = () => {
+  // Recenter controls for Kitchen, Rider, and Customer
+  const handleRecenterAll = () => {
     if (!mapInstanceRef.current) return;
     const markers: L.Marker[] = [];
-    if (userMarkerRef.current) markers.push(userMarkerRef.current);
+    if (kitchenMarkerRef.current) markers.push(kitchenMarkerRef.current);
     if (riderMarkerRef.current) markers.push(riderMarkerRef.current);
+    if (userMarkerRef.current) markers.push(userMarkerRef.current);
 
     if (markers.length > 0) {
       const group = L.featureGroup(markers);
@@ -411,6 +462,14 @@ export default function LiveTrackingMap({
         duration: 0.8
       });
     }
+  };
+
+  const handleFocusKitchen = () => {
+    if (!mapInstanceRef.current) return;
+    mapInstanceRef.current.setView([kitchenPos.lat, kitchenPos.lng], 16, {
+      animate: true,
+      duration: 0.8
+    });
   };
 
   const handleFocusRider = () => {
@@ -472,6 +531,51 @@ export default function LiveTrackingMap({
     <div className="w-full flex flex-col lg:flex-row gap-6">
       {/* Map Main Canvas */}
       <div className="flex-1 flex flex-col bg-white dark:bg-[#141414] rounded-2xl border border-gray-200 dark:border-white/10 shadow-sm overflow-hidden min-h-[460px] lg:min-h-[600px]">
+        
+        {/* Visual 3-Stage Path Journey: Kitchen ➔ Delivery Boy ➔ Customer */}
+        <div className="p-3 bg-gray-900 text-white border-b border-white/10 flex items-center justify-between gap-2 overflow-x-auto text-xs">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            {/* 1. Kitchen Pin */}
+            <button
+              onClick={handleFocusKitchen}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-200 hover:text-red-400 transition-all font-bold cursor-pointer"
+              title="Click to view Kitchen Location on map"
+            >
+              <Store className="w-3.5 h-3.5 text-red-500" />
+              <span>🏠 Kitchen</span>
+            </button>
+
+            <ArrowRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+
+            {/* 2. Delivery Boy Pin */}
+            <button
+              onClick={handleFocusRider}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-emerald-500/20 text-gray-200 hover:text-emerald-400 transition-all font-bold cursor-pointer"
+              title="Click to view Live Delivery Boy on map"
+            >
+              <Bike className="w-3.5 h-3.5 text-emerald-500" />
+              <span>🛵 {deliveryPartner.name.split(' ')[0]} (Live GPS)</span>
+            </button>
+
+            <ArrowRight className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+
+            {/* 3. Customer Pin */}
+            <button
+              onClick={handleFocusCustomer}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-blue-500/20 text-gray-200 hover:text-blue-400 transition-all font-bold cursor-pointer"
+              title="Click to view Customer Destination on map"
+            >
+              <MapPin className="w-3.5 h-3.5 text-blue-500" />
+              <span>📍 Customer</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto shrink-0 text-[11px] font-mono text-emerald-400">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+            <span className="hidden sm:inline">Real GPS Sync</span>
+          </div>
+        </div>
+
         {/* Map Top Bar */}
         <div className="p-4 border-b border-gray-100 dark:border-white/5 flex flex-wrap items-center justify-between gap-3 bg-gray-50/80 dark:bg-[#1a1a1a]/80 backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -527,6 +631,15 @@ export default function LiveTrackingMap({
               <span className="hidden sm:inline">Follow Rider</span>
             </button>
 
+            {/* Focus Kitchen */}
+            <button
+              onClick={handleFocusKitchen}
+              title="Center on Kitchen / Store"
+              className="p-2 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
+            >
+              <Store className="w-4 h-4 text-red-500" />
+            </button>
+
             {/* Focus Rider */}
             <button
               onClick={handleFocusRider}
@@ -539,16 +652,16 @@ export default function LiveTrackingMap({
             {/* Focus Customer */}
             <button
               onClick={handleFocusCustomer}
-              title="Center on My Location"
+              title="Center on Customer Location"
               className="p-2 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
             >
               <MapPin className="w-4 h-4 text-blue-500" />
             </button>
 
-            {/* Fit All */}
+            {/* Fit All (Kitchen + Rider + Customer) */}
             <button
-              onClick={handleRecenter}
-              title="Fit Full Route"
+              onClick={handleRecenterAll}
+              title="Fit Full Route (Kitchen, Rider, Customer)"
               className="p-2 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
             >
               <LocateFixed className="w-4 h-4" />
@@ -611,9 +724,20 @@ export default function LiveTrackingMap({
           </button>
         </div>
 
-        {/* Map Bottom Status Strip: Rider <-> Customer ONLY */}
+        {/* Map Bottom Status Strip: Kitchen -> Rider -> Customer */}
         <div className="p-4 bg-gray-50 dark:bg-[#101010] border-t border-gray-100 dark:border-white/5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-gray-700 dark:text-gray-300">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap text-gray-700 dark:text-gray-300">
+            <button
+              onClick={handleFocusKitchen}
+              className="flex items-center gap-1.5 hover:text-red-400 transition-colors"
+              title="Click to view Kitchen location"
+            >
+              <Store className="w-4 h-4 text-red-500" />
+              <span className="font-bold">🏠 Kitchen</span>
+            </button>
+
+            <span className="text-gray-400 font-bold">➔</span>
+
             <button
               onClick={handleFocusRider}
               className="flex items-center gap-1.5 hover:text-emerald-400 transition-colors"
@@ -623,7 +747,7 @@ export default function LiveTrackingMap({
               <span className="font-bold">🛵 {deliveryPartner.name} (Live Rider)</span>
             </button>
 
-            <span className="text-gray-400 font-bold">━━━━ ➔</span>
+            <span className="text-gray-400 font-bold">➔</span>
 
             <button
               onClick={handleFocusCustomer}

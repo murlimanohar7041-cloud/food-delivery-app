@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { 
   ArrowLeft, 
   Bike, 
@@ -11,14 +11,14 @@ import {
   Power, 
   AlertCircle, 
   Package, 
-  ChevronRight,
-  RefreshCw,
-  ExternalLink,
-  ShieldAlert,
-  MessageSquare,
-  Compass,
-  Gauge,
-  Sparkles
+  ChevronRight, 
+  RefreshCw, 
+  ExternalLink, 
+  ShieldAlert, 
+  MessageSquare, 
+  Compass, 
+  Gauge, 
+  Sparkles 
 } from 'lucide-react';
 import { Order, DeliveryPartner, OrderStatus } from '../types';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
@@ -26,8 +26,9 @@ import { auth, db } from '../firebase';
 import { collection, query, where, onSnapshot, updateDoc, getDocs } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
 import { getUserCurrentLocation } from '../utils/geoUtils';
-import OrderChatModal from './OrderChatModal';
-import CallModal from './CallModal';
+
+const OrderChatModal = lazy(() => import('./OrderChatModal'));
+const CallModal = lazy(() => import('./CallModal'));
 
 interface DeliveryPartnerDashboardProps {
   onBack: () => void;
@@ -614,33 +615,39 @@ export default function DeliveryPartnerDashboard({ onBack, partnerEmail }: Deliv
 
       {/* Real-time Order Chat Modal */}
       {chatOrder && (
-        <OrderChatModal
-          order={chatOrder}
-          currentUserRole="rider"
-          currentUserId={activePartner.id || auth.currentUser?.uid || 'rider-uid'}
-          currentUserName={activePartner.name}
-          onClose={() => setChatOrder(null)}
-          onInitiateCall={(role, phone, name) => {
-            setCallModalData({
-              isOpen: true,
-              targetRole: role,
-              targetName: name,
-              targetPhone: phone,
-              orderId: chatOrder.id
-            });
-          }}
-        />
+        <Suspense fallback={null}>
+          <OrderChatModal
+            order={chatOrder}
+            currentUserRole="rider"
+            currentUserId={activePartner.id || auth.currentUser?.uid || 'rider-uid'}
+            currentUserName={activePartner.name}
+            onClose={() => setChatOrder(null)}
+            onInitiateCall={(role, phone, name) => {
+              setCallModalData({
+                isOpen: true,
+                targetRole: role,
+                targetName: name,
+                targetPhone: phone,
+                orderId: chatOrder.id
+              });
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Secure Cellular Call Modal */}
-      <CallModal
-        isOpen={callModalData.isOpen}
-        onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
-        targetRole={callModalData.targetRole}
-        targetName={callModalData.targetName}
-        targetPhone={callModalData.targetPhone}
-        orderId={callModalData.orderId}
-      />
+      {callModalData.isOpen && (
+        <Suspense fallback={null}>
+          <CallModal
+            isOpen={callModalData.isOpen}
+            onClose={() => setCallModalData(prev => ({ ...prev, isOpen: false }))}
+            targetRole={callModalData.targetRole}
+            targetName={callModalData.targetName}
+            targetPhone={callModalData.targetPhone}
+            orderId={callModalData.orderId}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
